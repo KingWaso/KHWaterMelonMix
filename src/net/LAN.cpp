@@ -1,5 +1,5 @@
 /*
-    Copyright 2016-2025 melonDS team
+    Copyright 2016-2026 melonDS team
 
     This file is part of melonDS.
 
@@ -15,11 +15,6 @@
     You should have received a copy of the GNU General Public License along
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
-struct RelayHeader {
-    u8 targetID;
-};
-static const char* kRelayHost = "relay.yourdomain.com"; // or IP
-static const int kRelayPort = 7064;
 
 #include <stdio.h>
 #include <string.h>
@@ -170,7 +165,47 @@ std::vector<LAN::Player> LAN::GetPlayerList()
 }
 
 
-bool LAN::StartDiscovery() { return true; }
+bool LAN::StartDiscovery()
+{
+    if (!Inited) return false;
+
+    int res;
+
+    DiscoverySocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (DiscoverySocket < 0)
+    {
+        DiscoverySocket = INVALID_SOCKET;
+        return false;
+    }
+
+    sockaddr_in_t saddr;
+    memset(&saddr, 0, sizeof(saddr));
+    saddr.sin_family = AF_INET;
+    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    saddr.sin_port = htons(kDiscoveryPort);
+    res = bind(DiscoverySocket, (const sockaddr_t*)&saddr, sizeof(saddr));
+    if (res < 0)
+    {
+        closesocket(DiscoverySocket);
+        DiscoverySocket = INVALID_SOCKET;
+        return false;
+    }
+
+    int opt_true = 1;
+    res = setsockopt(DiscoverySocket, SOL_SOCKET, SO_BROADCAST, (const char*)&opt_true, sizeof(int));
+    if (res < 0)
+    {
+        closesocket(DiscoverySocket);
+        DiscoverySocket = INVALID_SOCKET;
+        return false;
+    }
+
+    DiscoveryLastTick = (u32)Platform::GetMSCount();
+    DiscoveryList.clear();
+
+    Active = true;
+    return true;
+}
 
 void LAN::EndDiscovery()
 {
@@ -195,7 +230,7 @@ bool LAN::StartHost(const char* playername, int numplayers)
     addr.host = ENET_HOST_ANY;
     addr.port = kLANPort;
 
-    Host = enet_host_create(nullptr, 16, 2, 0, 0);
+    Host = enet_host_create(&addr, 16, 2, 0, 0);
     if (!Host)
     {
         return false;
@@ -232,12 +267,13 @@ bool LAN::StartClient(const char* playername, const char* host)
 
     Host = enet_host_create(nullptr, 16, 2, 0, 0);
     if (!Host)
+    {
         return false;
+    }
 
     ENetAddress addr;
-    enet_address_set_host(&addr, kRelayHost);
-    addr.port = kRelayPort;
-
+    enet_address_set_host(&addr, host);
+    addr.port = kLANPort;
     ENetPeer* peer = enet_host_connect(Host, &addr, 2, 0);
     if (!peer)
     {
@@ -245,9 +281,6 @@ bool LAN::StartClient(const char* playername, const char* host)
         Host = nullptr;
         return false;
     }
-
-    // Save relay as ONLY peer
-    RemotePeers[0] = peer;
 
     Platform::Mutex_Lock(PlayersMutex);
 
@@ -260,23 +293,66 @@ bool LAN::StartClient(const char* playername, const char* host)
     Platform::Mutex_Unlock(PlayersMutex);
 
     ENetEvent event;
-    bool connected = false;
-
+    int conn = 0;
     u32 starttick = (u32)Platform::GetMSCount();
-
-    while ((u32)Platform::GetMSCount() - starttick < 5000)
+    const int conntimeout = 5000;
+    for (;;)
     {
-        if (enet_host_service(Host, &event, 1000) > 0)
+        u32 curtick = (u32)Platform::GetMSCount();
+        if (curtick < starttick) break;
+        int timeout = conntimeout - (int)(curtick - starttick);
+        if (timeout < 0) break;
+        if (enet_host_service(Host, &event, timeout) > 0)
         {
-            if (event.type == ENET_EVENT_TYPE_CONNECT)
+            if (conn == 0 && event.type == ENET_EVENT_TYPE_CONNECT)
             {
-                connected = true;
+                conn = 1;
+            }
+            else if (conn == 1 && event.type == ENET_EVENT_TYPE_RECEIVE)
+            {
+                u8* data = event.packet->data;
+                if (event.channelID != Chan_Cmd) continue;
+                if (data[0] != Cmd_ClientInit) continue;
+                if (event.packet->dataLength != 11) continue;
+
+                u32 magic = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
+                u32 version = data[5] | (data[6] << 8) | (data[7] << 16) | (data[8] << 24);
+                if (magic != kLANMagic) continue;
+                if (version != kProtocolVersion) continue;
+                if (data[10] > 16) continue;
+
+                MaxPlayers = data[10];
+
+                // send player information
+                MyPlayer.ID = data[9];
+                u8 cmd[9+sizeof(Player)];
+                cmd[0] = Cmd_PlayerInfo;
+                cmd[1] = (u8)kLANMagic;
+                cmd[2] = (u8)(kLANMagic >> 8);
+                cmd[3] = (u8)(kLANMagic >> 16);
+                cmd[4] = (u8)(kLANMagic >> 24);
+                cmd[5] = (u8)kProtocolVersion;
+                cmd[6] = (u8)(kProtocolVersion >> 8);
+                cmd[7] = (u8)(kProtocolVersion >> 16);
+                cmd[8] = (u8)(kProtocolVersion >> 24);
+                memcpy(&cmd[9], &MyPlayer, sizeof(Player));
+                ENetPacket* pkt = enet_packet_create(cmd, 9+sizeof(Player), ENET_PACKET_FLAG_RELIABLE);
+                enet_peer_send(event.peer, Chan_Cmd, pkt);
+
+                conn = 2;
+                break;
+            }
+            else if (event.type == ENET_EVENT_TYPE_DISCONNECT)
+            {
+                conn = 0;
                 break;
             }
         }
+        else
+            break;
     }
 
-    if (!connected)
+    if (conn != 2)
     {
         enet_peer_reset(peer);
         enet_host_destroy(Host);
@@ -285,25 +361,15 @@ bool LAN::StartClient(const char* playername, const char* host)
     }
 
     HostAddress = addr.host;
+    LastHostID = -1;
+    LastHostPeer = nullptr;
+    RemotePeers[0] = peer;
+    peer->data = &Players[0];
+
     Active = true;
     IsHost = false;
-
-    
-    std::wstring roomPath = L"/join?room=1000"; // test room
-    std::string roomID = HTTP_GET(L"yourserver.com", roomPath);
-        
-    ENetPacket* pkt = enet_packet_create(
-        roomID.c_str(),
-        roomID.size() + 1,
-        ENET_PACKET_FLAG_RELIABLE
-);
-
-enet_peer_send(RemotePeers[0], 0, pkt);
-enet_host_flush(Host);
-
-return true;
+    return true;
 }
-
 
 void LAN::EndSession()
 {
@@ -335,8 +401,98 @@ void LAN::EndSession()
 }
 
 
+void LAN::ProcessDiscovery()
+{
+    if (DiscoverySocket == INVALID_SOCKET)
+        return;
 
-void LAN::ProcessDiscovery() {}
+    u32 tick = (u32)Platform::GetMSCount();
+    if ((tick - DiscoveryLastTick) < 1000)
+        return;
+
+    DiscoveryLastTick = tick;
+
+    if (IsHost)
+    {
+        // advertise this LAN session over the network
+
+        DiscoveryData beacon;
+        memset(&beacon, 0, sizeof(beacon));
+        beacon.Magic = kDiscoveryMagic;
+        beacon.Version = kProtocolVersion;
+        beacon.Tick = tick;
+        snprintf(beacon.SessionName, 64, "%s's game", MyPlayer.Name);
+        beacon.NumPlayers = NumPlayers;
+        beacon.MaxPlayers = MaxPlayers;
+        beacon.Status = 0; // TODO
+
+        sockaddr_in_t saddr;
+        memset(&saddr, 0, sizeof(saddr));
+        saddr.sin_family = AF_INET;
+        saddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+        saddr.sin_port = htons(kDiscoveryPort);
+
+        sendto(DiscoverySocket, (const char*)&beacon, sizeof(beacon), 0, (const sockaddr_t*)&saddr, sizeof(saddr));
+    }
+    else
+    {
+        Platform::Mutex_Lock(DiscoveryMutex);
+
+        // listen for LAN sessions
+
+        fd_set fd;
+        struct timeval tv;
+        for (;;)
+        {
+            FD_ZERO(&fd); FD_SET(DiscoverySocket, &fd);
+            tv.tv_sec = 0; tv.tv_usec = 0;
+            if (!select(DiscoverySocket+1, &fd, nullptr, nullptr, &tv))
+                break;
+
+            DiscoveryData beacon;
+            sockaddr_in_t raddr;
+            socklen_t ralen = sizeof(raddr);
+
+            int rlen = recvfrom(DiscoverySocket, (char*)&beacon, sizeof(beacon), 0, (sockaddr_t*)&raddr, &ralen);
+            if (rlen < sizeof(beacon)) continue;
+            if (beacon.Magic != kDiscoveryMagic) continue;
+            if (beacon.Version != kProtocolVersion) continue;
+            if (beacon.MaxPlayers > 16) continue;
+            if (beacon.NumPlayers > beacon.MaxPlayers) continue;
+
+            u32 key = ntohl(raddr.sin_addr.s_addr);
+
+            if (DiscoveryList.find(key) != DiscoveryList.end())
+            {
+                if (beacon.Tick <= DiscoveryList[key].Tick)
+                    continue;
+            }
+
+            beacon.Magic = tick;
+            beacon.SessionName[63] = '\0';
+            DiscoveryList[key] = beacon;
+        }
+
+        // cleanup: remove hosts that haven't given a sign of life in the last 5 seconds
+
+        std::vector<u32> deletelist;
+
+        for (const auto& [key, data] : DiscoveryList)
+        {
+            u32 age = tick - data.Magic;
+            if (age < 5000) continue;
+
+            deletelist.push_back(key);
+        }
+
+        for (const auto& key : deletelist)
+        {
+            DiscoveryList.erase(key);
+        }
+
+        Platform::Mutex_Unlock(DiscoveryMutex);
+    }
+}
 
 void LAN::HostUpdatePlayerList()
 {
@@ -345,11 +501,7 @@ void LAN::HostUpdatePlayerList()
     cmd[1] = (u8)NumPlayers;
     memcpy(&cmd[2], Players, sizeof(Players));
     ENetPacket* pkt = enet_packet_create(cmd, 2+sizeof(Players), ENET_PACKET_FLAG_RELIABLE);
-    for (int i = 0; i < 16; i++)
-{
-    if (RemotePeers[i])
-        enet_peer_send(RemotePeers[i], Chan_Cmd, pkt);
-}
+    enet_host_broadcast(Host, Chan_Cmd, pkt);
 }
 
 void LAN::ClientUpdatePlayerList()
@@ -399,7 +551,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
 
                 Players[id].ID = id;
                 Players[id].Status = Player_Connecting;
-                // In relay mode, all connections go through server
+                Players[id].Address = event.peer->address.host;
                 event.peer->data = &Players[id];
                 NumPlayers++;
 
@@ -467,7 +619,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
                     Platform::Mutex_Lock(PlayersMutex);
 
                     player.Status = Player_Client;
-                    player.Address = 0;
+                    player.Address = event.peer->address.host;
                     memcpy(hostside, &player, sizeof(Player));
 
                     Platform::Mutex_Unlock(PlayersMutex);
@@ -514,9 +666,28 @@ void LAN::ProcessClientEvent(ENetEvent& event)
         {
             // another client is establishing a direct connection to us
 
-            // Relay mode: no direct peer connections
-            enet_peer_disconnect(event.peer, 0);
-            
+            int playerid = -1;
+            for (int i = 0; i < 16; i++)
+            {
+                Player* player = &Players[i];
+                if (i == MyPlayer.ID) continue;
+                if (player->Status != Player_Client) continue;
+
+                if (player->Address == event.peer->address.host)
+                {
+                    playerid = i;
+                    break;
+                }
+            }
+
+            if (playerid < 0)
+            {
+                enet_peer_disconnect(event.peer, 0);
+                break;
+            }
+
+            RemotePeers[playerid] = event.peer;
+            event.peer->data = &Players[playerid];
         }
         break;
 
@@ -528,11 +699,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
             ConnectedBitmask &= ~(1 << player->ID);
 
             int id = player->ID;
-            for (int i = 0; i < 16; i++)
-{
-    if (RemotePeers[i] == event.peer)
-        RemotePeers[i] = nullptr;
-}
+            RemotePeers[id] = nullptr;
 
             Platform::Mutex_Lock(PlayersMutex);
             player->Status = Player_Disconnected;
@@ -566,7 +733,24 @@ void LAN::ProcessClientEvent(ENetEvent& event)
                     Platform::Mutex_Unlock(PlayersMutex);
 
                     // establish connections to any new clients
-                    // Relay mode: no peer connections needed
+                    for (int i = 0; i < 16; i++)
+                    {
+                        Player* player = &Players[i];
+                        if (i == MyPlayer.ID) continue;
+                        if (player->Status != Player_Client) continue;
+
+                        if (!RemotePeers[i])
+                        {
+                            ENetAddress peeraddr;
+                            peeraddr.host = player->Address;
+                            peeraddr.port = kLANPort;
+                            ENetPeer* peer = enet_host_connect(Host, &peeraddr, 2, 0);
+                            if (!peer)
+                            {
+                                // TODO deal with this
+                                continue;
+                            }
+                        }
                     }
                 }
                 break;
@@ -614,7 +798,6 @@ void LAN::ProcessEvent(ENetEvent& event)
 void LAN::ProcessLAN(int type)
 {
     if (!Host) return;
-
 
     u32 time_last = (u32)Platform::GetMSCount();
 
@@ -666,7 +849,8 @@ void LAN::ProcessLAN(int type)
                 good = false;
             else if (header->Magic != 0x4946494E)
                 good = false;
-            // Relay already filters sender, allow all
+            else if (header->SenderID == MyPlayer.ID)
+                good = false;
 
             if (!good)
             {
@@ -739,7 +923,7 @@ void LAN::Begin(int inst)
 
     u8 cmd = Cmd_PlayerConnect;
     ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
-    enet_peer_send(RemotePeers[0], Chan_Cmd, pkt);
+    enet_host_broadcast(Host, Chan_Cmd, pkt);
 }
 
 void LAN::End(int inst)
@@ -750,49 +934,34 @@ void LAN::End(int inst)
 
     u8 cmd = Cmd_PlayerDisconnect;
     ENetPacket* pkt = enet_packet_create(&cmd, 1, ENET_PACKET_FLAG_RELIABLE);
-    enet_peer_send(RemotePeers[0], Chan_Cmd, pkt);
+    enet_host_broadcast(Host, Chan_Cmd, pkt);
 }
 
 
 int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
-    if (!Host || !RemotePeers[0]) return 0;
+    if (!Host) return 0;
 
+    // TODO make the reliable part optional?
+    //u32 flags = ENET_PACKET_FLAG_RELIABLE;
     u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
 
-    // Allocate FULL packet size (header + relay + payload)
-    ENetPacket* enetpacket = enet_packet_create(
-        nullptr,
-        sizeof(MPPacketHeader) + sizeof(RelayHeader) + len,
-        flags
-    );
+    ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
-    // --- Build MP header ---
     MPPacketHeader pktheader;
     pktheader.Magic = 0x4946494E;
     pktheader.SenderID = MyPlayer.ID;
     pktheader.Type = type;
     pktheader.Length = len;
     pktheader.Timestamp = timestamp;
-
-    // --- Build relay header ---
-    RelayHeader relay;
-    relay.targetID = 0xFF; // broadcast
-
-    // --- Copy into packet ---
     memcpy(&enetpacket->data[0], &pktheader, sizeof(MPPacketHeader));
-    memcpy(&enetpacket->data[sizeof(MPPacketHeader)], &relay, sizeof(RelayHeader));
-
     if (len)
-    {
-        memcpy(
-            &enetpacket->data[sizeof(MPPacketHeader) + sizeof(RelayHeader)],
-            packet,
-            len
-        );
-    }
+        memcpy(&enetpacket->data[sizeof(MPPacketHeader)], packet, len);
 
-    enet_peer_send(RemotePeers[0], Chan_MP, enetpacket);
+    if (((type & 0xFFFF) == 2) && LastHostPeer)
+        enet_peer_send(LastHostPeer, Chan_MP, enetpacket);
+    else
+        enet_host_broadcast(Host, Chan_MP, enetpacket);
     enet_host_flush(Host);
 
     return len;
@@ -814,16 +983,7 @@ int LAN::RecvPacketGeneric(u8* packet, bool block, u64* timestamp)
     {
         if (len > 2048) len = 2048;
 
-        memcpy(
-        packet,
-        &enetpacket->data[sizeof(MPPacketHeader) + sizeof(RelayHeader)],
-        if (enetpacket->dataLength < sizeof(MPPacketHeader) + sizeof(RelayHeader))
-        {
-            enet_packet_destroy(enetpacket);
-            return 0;
-        }
-        len
-        );
+        memcpy(packet, &enetpacket->data[sizeof(MPPacketHeader)], len);
 
         if (header->Type == 1)
         {
@@ -913,11 +1073,7 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
                 if (len > 1024) len = 1024;
 
                 u32 aid = header->Type >> 16;
-                memcpy(
-                &packets[(aid-1)*1024],
-                &enetpacket->data[sizeof(MPPacketHeader) + sizeof(RelayHeader)],
-                len
-                );
+                memcpy(&packets[(aid-1)*1024], &enetpacket->data[sizeof(MPPacketHeader)], len);
 
                 ret |= (1<<aid);
             }
@@ -937,38 +1093,3 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 }
 
 }
-
-
-#include <winhttp.h>
-
-std::string HTTP_GET(const std::wstring& host, const std::wstring& path)
-{
-    HINTERNET hSession = WinHttpOpen(L"KHMelonMix/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS, 0);
-
-    HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), 8080, 0);
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(),
-        NULL, WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
-
-    WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-        WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
-
-    WinHttpReceiveResponse(hRequest, NULL);
-
-    char buffer[256] = {0};
-    DWORD bytesRead = 0;
-
-    WinHttpReadData(hRequest, buffer, sizeof(buffer) - 1, &bytesRead);
-
-    std::string result(buffer, bytesRead);
-
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
-
-    return result;
-}
-
