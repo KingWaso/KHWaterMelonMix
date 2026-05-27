@@ -1659,7 +1659,7 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
             IOPORT(W_BeaconCount2) += 10;
     }
 
-    if ((frametype == 0x0010) && timestamp && macgood)
+    if ((frametype == 0x0010) && macgood)
     {
         // if receiving an association response: get the sync value from the host
 
