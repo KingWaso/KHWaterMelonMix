@@ -1653,10 +1653,10 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
     // post-beacon interval to see if any clients are trying to connect
     // the auth/assoc procedure would normally fit during that window, but when we are emulating wifi
     // and not yet synced, these frames may lag behind, preventing a successful connection
-    if ((frametype == 0x00B0 || frametype == 0x0010 || frametype == 0x0000) && timestamp && macgood)
+    if ((frametype == 0x00B0 || frametype == 0x0010 || frametype == 0x0000) && macgood)
     {
-        if (IOPORT(W_BeaconCount2))
-            IOPORT(W_BeaconCount2) += 10;
+    if (IOPORT(W_BeaconCount2))
+        IOPORT(W_BeaconCount2) += 50;  // larger window for VPN latency
     }
 
     if ((frametype == 0x0010) && macgood)
@@ -1666,14 +1666,20 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
         u16 aid = *(u16*)&RXBuffer[12+24+4];
 
         if (aid)
-        {
-            Log(LogLevel::Debug, "[CLIENT %01X] host sync=%016llX\n", aid&0xF, timestamp);
+    {
+    Log(LogLevel::Debug, "[CLIENT %01X] host sync=%016llX\n", aid&0xF, timestamp);
 
-            IsMP = true;
-            IsMPClient = true;
-            USTimestamp = timestamp;
-            NextSync = RXTimestamp + (framelen * (txrate==0x14 ? 4:8));
-        }
+    IsMP = true;
+    IsMPClient = true;
+    // KHWaterMelonMix: only adopt host timestamp if non-zero and ahead of
+    // current counter; VPN can deliver assoc responses with timestamp=0
+    if (timestamp && timestamp > USTimestamp)
+        USTimestamp = timestamp;
+    // Ensure NextSync is always ahead of current position so USTimer
+    // immediately begins polling for host MP frames
+    u64 base = RXTimestamp ? RXTimestamp : USTimestamp;
+    NextSync = base + (framelen * (txrate==0x14 ? 4:8));
+    }
 
         RXTimestamp = 0;
         StartRX();
@@ -1762,10 +1768,10 @@ void Wifi::USTimer(u32 param)
             StartRX();
         }
 
-        if (USTimestamp >= NextSync)
+       if (USTimestamp >= NextSync || (IsMPClient && NextSync == 0))
         {
-            // TODO: not do this every tick if it fails to receive a frame!
-            CheckRX(2);
+        // KHWaterMelonMix: poll for host frames even when timestamp sync is uncertain
+        CheckRX(2);
         }
     }
 
