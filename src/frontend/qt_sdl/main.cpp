@@ -286,7 +286,7 @@ int main(int argc, char** argv)
     qputenv("QT_QPA_PLATFORM", "windows:darkmode=2");
 #endif
 
-    printf("Melon Mix " MELONDS_VERSION "\n");
+    printf("Water Melon Mix " MELONDS_VERSION "\n");
     printf(MELONDS_URL "\n");
 
     // easter egg - not worth checking other cases for something so dumb
