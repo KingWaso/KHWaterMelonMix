@@ -95,7 +95,7 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 25;
+    MPRecvTimeout = 10;
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -811,11 +811,13 @@ void LAN::ProcessLAN(int type)
         MPPacketHeader* header = (MPPacketHeader*)&enetpacket->data[0];
         u32 packettime = header->Magic;
 
-        if ((packettime > time_last) || (packettime < (time_last - 16)))
-        {
-            RXQueue.pop();
-            enet_packet_destroy(enetpacket);
-        }
+    // KHWaterMelonMix: widened stale packet window from 16ms to 50ms
+    // VPN adds 20-40ms latency so 16ms is too tight and discards valid packets
+    if ((packettime > time_last) || (packettime < (time_last - 50)))
+    {
+        RXQueue.pop();
+        enet_packet_destroy(enetpacket);
+    }
         else
         {
             // we got a packet, depending on what the caller wants we might be able to return now
@@ -899,6 +901,7 @@ void LAN::Process()
 
         Platform::Mutex_Lock(PlayersMutex);
 
+        u32 maxRTT = 0;
         for (int i = 0; i < 16; i++)
         {
             if (Players[i].Status == Player_None) continue;
@@ -906,7 +909,19 @@ void LAN::Process()
             if (!RemotePeers[i]) continue;
 
             Players[i].Ping = RemotePeers[i]->roundTripTime;
+            // KHWaterMelonMix: track max RTT for adaptive timeout
+            if (RemotePeers[i]->roundTripTime > maxRTT)
+                maxRTT = RemotePeers[i]->roundTripTime;
         }
+
+        // KHWaterMelonMix: adaptive recv timeout
+        // clamp between 8ms and 20ms based on worst peer RTT/2
+        // this keeps us from blocking too long while still giving
+        // high-latency VPN peers a fair chance to reply
+        u32 adaptiveTimeout = maxRTT / 2;
+        if (adaptiveTimeout < 8)  adaptiveTimeout = 8;
+        if (adaptiveTimeout > 20) adaptiveTimeout = 20;
+        MPRecvTimeout = adaptiveTimeout;
 
         Platform::Mutex_Unlock(PlayersMutex);
     }
@@ -942,8 +957,6 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    // TODO make the reliable part optional?
-    //u32 flags = ENET_PACKET_FLAG_RELIABLE;
     u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
@@ -962,7 +975,11 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
         enet_peer_send(LastHostPeer, Chan_MP, enetpacket);
     else
         enet_host_broadcast(Host, Chan_MP, enetpacket);
-    enet_host_flush(Host);
+
+    // KHWaterMelonMix: removed enet_host_flush(Host) here.
+    // Flushing after every packet causes blocking on each send.
+    // enet_host_service() in ProcessLAN handles flushing naturally
+    // as part of its service loop, which is called every frame.
 
     return len;
 }
@@ -1062,8 +1079,10 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         bool good = true;
         if ((header->Type & 0xFFFF) != 2)
             good = false;
-        else if (header->Timestamp < (timestamp - 32))
-            good = false;
+        // KHWaterMelonMix: widened reply staleness window from 32 to 100
+        // for VPN tolerance
+        else if (header->Timestamp < (timestamp - 100))
+        good = false;
 
         if (good)
         {
