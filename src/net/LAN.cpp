@@ -95,7 +95,7 @@ LAN::LAN() noexcept : Inited(false)
 
     ConnectedBitmask = 0;
 
-    MPRecvTimeout = 10;
+    MPRecvTimeout = 14;
     LastHostID = -1;
     LastHostPeer = nullptr;
 
@@ -919,8 +919,8 @@ void LAN::Process()
         // this keeps us from blocking too long while still giving
         // high-latency VPN peers a fair chance to reply
         u32 adaptiveTimeout = maxRTT / 2;
-        if (adaptiveTimeout < 8)  adaptiveTimeout = 8;
-        if (adaptiveTimeout > 20) adaptiveTimeout = 20;
+        if (adaptiveTimeout < 14) adaptiveTimeout = 14;
+        if (adaptiveTimeout > 35) adaptiveTimeout = 35;
         MPRecvTimeout = adaptiveTimeout;
 
         Platform::Mutex_Unlock(PlayersMutex);
@@ -957,7 +957,12 @@ int LAN::SendPacketGeneric(u32 type, u8* packet, int len, u64 timestamp)
 {
     if (!Host) return 0;
 
-    u32 flags = ENET_PACKET_FLAG_UNSEQUENCED;
+    // KHWaterMelonMix: use reliable delivery for CMD(1) and ACK(3) frames
+    // only MP reply frames (type 2) use unsequenced for speed
+    u32 type_low = type & 0xFFFF;
+    u32 flags = (type_low == 1 || type_low == 3)
+        ? ENET_PACKET_FLAG_RELIABLE
+        : ENET_PACKET_FLAG_UNSEQUENCED;
 
     ENetPacket* enetpacket = enet_packet_create(nullptr, sizeof(MPPacketHeader)+len, flags);
 
@@ -1081,8 +1086,8 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
             good = false;
         // KHWaterMelonMix: widened reply staleness window from 32 to 100
         // for VPN tolerance
-        else if (header->Timestamp < (timestamp - 100))
-        good = false;
+        else if (header->Timestamp < (timestamp - 250))
+            good = false;
 
         if (good)
         {
