@@ -122,6 +122,8 @@ private:
 
     // should render frame utils
     bool _hasVisible3DOnBottomScreen = false;
+    // KHWaterMelonMix: WiFi patch state
+    bool _wifiPatchesApplied = false;
     bool _ignore3DOnBottomScreen = false;
     bool _priorIgnore3DOnBottomScreen = false;
     bool _priorPriorIgnore3DOnBottomScreen = false;
@@ -190,6 +192,8 @@ private:
 
     bool ShouldShowBottomScreen = false;
     bool isDialogVisible();
+    // KHWaterMelonMix: WiFi patch state
+    bool _wifiPatchesApplied = false;
     bool isMinimapVisible();
     bool isMissionInformationVisibleOnTopScreen();
     bool isMissionInformationVisibleOnBottomScreen();
