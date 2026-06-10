@@ -1085,9 +1085,10 @@ u16 LAN::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
         bool good = true;
         if ((header->Type & 0xFFFF) != 2)
             good = false;
-        // KHWaterMelonMix: widened reply staleness window from 32 to 100
-        // for VPN tolerance
-        else if (header->Timestamp < (timestamp - 250))
+        // KHWaterMelonMix: Timestamp is DS microseconds from the host.
+        // Under VPN with clock skew, use a generous window of 500ms in DS-us.
+        // 500,000 µs = 0.5 seconds of tolerance.
+        else if (timestamp > 500000 && header->Timestamp < (timestamp - 500000))
             good = false;
 
         if (good)
