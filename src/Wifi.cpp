@@ -1768,12 +1768,13 @@ void Wifi::USTimer(u32 param)
             StartRX();
         }
 
-       if (USTimestamp >= NextSync || (IsMPClient && NextSync == 0))
+        // KHWaterMelonMix: don't poll for host frames until NextSync has been
+        // set from a real assoc response. NextSync==0 with IsMPClient==true is
+        // a transient state during handshake that causes a premature -1 return.
+        if (IsMPClient && NextSync != 0 && USTimestamp >= NextSync)
         {
-        // KHWaterMelonMix: poll for host frames even when timestamp sync is uncertain
-        CheckRX(2);
+            CheckRX(2);
         }
-    }
 
     if (!(USTimestamp & 0x3FF & kTimeCheckMask))
         WifiAP->MSTimer();
