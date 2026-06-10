@@ -1050,9 +1050,10 @@ int LAN::RecvHostPacket(int inst, u8* packet, u64* timestamp)
 {
     if (LastHostID != -1)
     {
-        // check if the host is still connected
-
-        if (!(ConnectedBitmask & (1<<LastHostID)))
+        // KHWaterMelonMix: only reject if we've seen at least one Connect
+        // broadcast AND the host has since disconnected. During initial
+        // handshake ConnectedBitmask may be 0 even though the host is live.
+        if (ConnectedBitmask != 0 && !(ConnectedBitmask & (1<<LastHostID)))
             return -1;
     }
 
