@@ -192,8 +192,6 @@ private:
 
     bool ShouldShowBottomScreen = false;
     bool isDialogVisible();
-    // KHWaterMelonMix: WiFi patch state
-    bool _wifiPatchesApplied = false;
     bool isMinimapVisible();
     bool isMissionInformationVisibleOnTopScreen();
     bool isMissionInformationVisibleOnBottomScreen();
