@@ -639,23 +639,22 @@ int RelayServer::RecvHostPacket(int inst, u8* data, u64* timestamp)
 u16 RelayServer::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 {
     u16 ret = 0;
-    std::lock_guard<std::mutex> lk(RXMutex);
 
-    // KHWaterMelonMix: wait briefly for replies to arrive through relay
-    // before draining. Without this, host calls RecvReplies before the
-    // client's reply packet has been received and routed.
+    // KHWaterMelonMix: wait up to 20ms for client replies to arrive
+    // through the relay before draining. Without this, the host calls
+    // RecvReplies before the client reply packet has been routed.
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(20);
-
     while (std::chrono::steady_clock::now() < deadline)
     {
-        if (!RXHostQueue.empty()) break;
-        // Unlock briefly to let AcceptThread push packets
-        RXMutex.unlock();
+        {
+            std::lock_guard<std::mutex> lk(RXMutex);
+            if (!RXHostQueue.empty()) break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        RXMutex.lock();
     }
 
+    std::lock_guard<std::mutex> lk(RXMutex);
     while (!RXHostQueue.empty())
     {
         RXEntry& e = RXHostQueue.front();
@@ -676,12 +675,11 @@ u16 RelayServer::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 }
 
 int RelayServer::RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
-                              bool block, u32 typeFilter)
+                              bool block, u32 typeFilter, int timeoutMS)
 {
     if (block)
     {
-        // Spin-wait with short sleeps (mirrors LAN.cpp blocking behaviour)
-        u64 deadline = NowUS() + 25000ULL; // 25ms timeout
+        u64 deadline = NowUS() + (u64)timeoutMS * 1000ULL;
         while (NowUS() < deadline)
         {
             {
@@ -1003,10 +1001,8 @@ int RelayClient::SendAck(int inst, u8* data, int len, u64 timestamp)
 
 int RelayClient::RecvHostPacket(int inst, u8* data, u64* timestamp)
 {
-    // KHWaterMelonMix: use short timeout to avoid halving framerate.
-    // Wifi.cpp calls this every kTimerInterval; blocking 25ms per call
-    // at 60fps drops to 30fps. 5ms gives enough time for a relay round
-    // trip without stalling the emulator thread.
+    // KHWaterMelonMix: 5ms timeout prevents halving framerate.
+    // Wifi.cpp calls this every timer tick; 25ms blocks too long at 60fps.
     return RecvGeneric(RXHostQueue, data, timestamp, true, 0xFFFFFFFF, 5);
 }
 
