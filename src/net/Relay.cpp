@@ -645,7 +645,7 @@ u16 RelayServer::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
     // RecvReplies is called once per CMD cycle from ProcessTX, not every
     // timer tick, so an 8ms wait here doesn't hurt framerate but gives
     // the relay enough time to route the client's reply back to the host.
-    u64 deadline = NowUS() + 8000ULL;
+    u64 deadline = NowUS() + 5000ULL;
     while (NowUS() < deadline)
     {
         {
