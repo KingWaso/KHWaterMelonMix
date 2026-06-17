@@ -639,8 +639,23 @@ int RelayServer::RecvHostPacket(int inst, u8* data, u64* timestamp)
 u16 RelayServer::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 {
     u16 ret = 0;
-    // Drain RXHostQueue for reply packets within timestamp window
     std::lock_guard<std::mutex> lk(RXMutex);
+
+    // KHWaterMelonMix: wait briefly for replies to arrive through relay
+    // before draining. Without this, host calls RecvReplies before the
+    // client's reply packet has been received and routed.
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(20);
+
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (!RXHostQueue.empty()) break;
+        // Unlock briefly to let AcceptThread push packets
+        RXMutex.unlock();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        RXMutex.lock();
+    }
+
     while (!RXHostQueue.empty())
     {
         RXEntry& e = RXHostQueue.front();
@@ -988,7 +1003,11 @@ int RelayClient::SendAck(int inst, u8* data, int len, u64 timestamp)
 
 int RelayClient::RecvHostPacket(int inst, u8* data, u64* timestamp)
 {
-    return RecvGeneric(RXHostQueue, data, timestamp, true);
+    // KHWaterMelonMix: use short timeout to avoid halving framerate.
+    // Wifi.cpp calls this every kTimerInterval; blocking 25ms per call
+    // at 60fps drops to 30fps. 5ms gives enough time for a relay round
+    // trip without stalling the emulator thread.
+    return RecvGeneric(RXHostQueue, data, timestamp, true, 0xFFFFFFFF, 5);
 }
 
 u16 RelayClient::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
@@ -1015,11 +1034,11 @@ u16 RelayClient::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 }
 
 int RelayClient::RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
-                              bool block, u32 typeFilter)
+                              bool block, u32 typeFilter, int timeoutMS)
 {
     if (block)
     {
-        u64 deadline = NowUS() + 25000ULL; // 25ms timeout
+        u64 deadline = NowUS() + (u64)timeoutMS * 1000ULL;
         while (NowUS() < deadline)
         {
             {
