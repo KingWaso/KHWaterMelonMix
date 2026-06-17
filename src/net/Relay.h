@@ -227,8 +227,8 @@ private:
 
     void RecvLoop();
     bool SendMsg(u32 type, const u8* payload, int len);
-    int  RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
-                     bool block, u32 typeFilter = 0xFFFFFFFF);
+    int RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
+                bool block, u32 typeFilter = 0xFFFFFFFF, int timeoutMS = 25);
 };
 
 // ─── Relay MPInterface ────────────────────────────────────────────────────────
