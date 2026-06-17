@@ -261,74 +261,86 @@ void RelayServer::AcceptLoop()
 
     while (Running)
     {
-        // Use select with a short timeout so we can check Running
+        // Build fd_set from listen socket + all client sockets
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(ListenSock, &fds);
-        struct timeval tv = {0, 8000}; // 8ms — matches DS timer interval
-        int r = select((int)ListenSock + 1, &fds, nullptr, nullptr, &tv);
+        socket_t maxfd = ListenSock;
 
-        if (r > 0 && FD_ISSET(ListenSock, &fds))
-        {
-            struct sockaddr_in caddr;
-            socklen_t clen = sizeof(caddr);
-            socket_t csock = accept(ListenSock, (struct sockaddr*)&caddr, &clen);
-            if (csock == INVALID_SOCKET) continue;
-
-            SetNoDelay(csock);
-
-            std::lock_guard<std::mutex> lk(ClientsMutex);
-
-            // Find a free slot (skip slot 0 = host)
-            int slot = -1;
-            for (int i = 1; i < MaxPlayers; i++)
-            {
-                bool used = false;
-                for (auto& c : Clients)
-                    if (c.Player.ID == i) { used = true; break; }
-                if (!used) { slot = i; break; }
-            }
-
-            if (slot < 0 || (int)Clients.size() >= MaxPlayers)
-            {
-                // Full — send NAK and close
-                RelayMsgHeader nak;
-                nak.Magic  = kRelayMagic;
-                nak.Type   = RMsg_HelloNak;
-                nak.Length = 0;
-                SendAll(csock, (u8*)&nak, sizeof(nak));
-                closesocket(csock);
-                continue;
-            }
-
-            ClientConn cc;
-            cc.Sock       = csock;
-            cc.Handshaked = false;
-            cc.Ping       = 0;
-            memset(&cc.Player, 0, sizeof(cc.Player));
-            cc.Player.ID      = slot;
-            cc.Player.Address = caddr.sin_addr.s_addr;
-            Clients.push_back(std::move(cc));
-
-            Log(LogLevel::Info, "Relay: new connection slot %d\n", slot);
-        }
-
-        // Service all connected clients (non-blocking reads)
         {
             std::lock_guard<std::mutex> lk(ClientsMutex);
             for (auto& c : Clients)
             {
                 if (c.Sock == INVALID_SOCKET) continue;
+                FD_SET(c.Sock, &fds);
+                if (c.Sock > maxfd) maxfd = c.Sock;
+            }
+        }
+
+        // 1ms timeout so we check Running regularly without busy-spinning
+        struct timeval tv = {0, 1000};
+        int r = select((int)maxfd + 1, &fds, nullptr, nullptr, &tv);
+
+        if (r <= 0) continue;
+
+        // Accept new connections
+        if (FD_ISSET(ListenSock, &fds))
+        {
+            struct sockaddr_in caddr;
+            socklen_t clen = sizeof(caddr);
+            socket_t csock = accept(ListenSock, (struct sockaddr*)&caddr, &clen);
+            if (csock != INVALID_SOCKET)
+            {
+                SetNoDelay(csock);
+
+                std::lock_guard<std::mutex> lk(ClientsMutex);
+
+                int slot = -1;
+                for (int i = 1; i < MaxPlayers; i++)
+                {
+                    bool used = false;
+                    for (auto& c : Clients)
+                        if (c.Player.ID == i) { used = true; break; }
+                    if (!used) { slot = i; break; }
+                }
+
+                if (slot < 0 || (int)Clients.size() >= MaxPlayers)
+                {
+                    RelayMsgHeader nak = {kRelayMagic, RMsg_HelloNak, 0};
+                    SendAll(csock, (u8*)&nak, sizeof(nak));
+                    closesocket(csock);
+                }
+                else
+                {
+                    ClientConn cc;
+                    cc.Sock       = csock;
+                    cc.Handshaked = false;
+                    cc.Ping       = 0;
+                    memset(&cc.Player, 0, sizeof(cc.Player));
+                    cc.Player.ID      = slot;
+                    cc.Player.Address = caddr.sin_addr.s_addr;
+                    Clients.push_back(std::move(cc));
+                    Log(LogLevel::Info, "Relay: new connection slot %d\n", slot);
+                }
+            }
+        }
+
+        // Service only clients that have data ready
+        {
+            std::lock_guard<std::mutex> lk(ClientsMutex);
+            for (auto& c : Clients)
+            {
+                if (c.Sock == INVALID_SOCKET) continue;
+                if (!FD_ISSET(c.Sock, &fds)) continue; // skip if no data
                 ServiceClient(c);
             }
-            // KHWaterMelonMix: yield after servicing to give emulator
-            // thread priority on Windows where scheduling is coarse.
-            std::this_thread::yield();
+
             // Remove disconnected clients
             Clients.erase(
                 std::remove_if(Clients.begin(), Clients.end(),
                     [](const ClientConn& c){
-                        return c.Sock != INVALID_SOCKET && !c.Player.Connected && c.Handshaked;
+                        return c.Sock != INVALID_SOCKET &&
+                               !c.Player.Connected && c.Handshaked;
                     }),
                 Clients.end());
         }
