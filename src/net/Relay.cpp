@@ -641,6 +641,20 @@ u16 RelayServer::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 {
     u16 ret = 0;
 
+    // KHWaterMelonMix: wait up to 8ms for client replies.
+    // RecvReplies is called once per CMD cycle from ProcessTX, not every
+    // timer tick, so an 8ms wait here doesn't hurt framerate but gives
+    // the relay enough time to route the client's reply back to the host.
+    u64 deadline = NowUS() + 8000ULL;
+    while (NowUS() < deadline)
+    {
+        {
+            std::lock_guard<std::mutex> lk(RXMutex);
+            if (!RXHostQueue.empty()) break;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+
     std::lock_guard<std::mutex> lk(RXMutex);
     while (!RXHostQueue.empty())
     {
@@ -988,10 +1002,11 @@ int RelayClient::SendAck(int inst, u8* data, int len, u64 timestamp)
 
 int RelayClient::RecvHostPacket(int inst, u8* data, u64* timestamp)
 {
-    // KHWaterMelonMix: non-blocking. Wifi.cpp polls this every timer tick
-    // so blocking here stalls the emulator thread. If nothing is queued,
-    // return 0 and let the next tick pick it up.
-    return RecvGeneric(RXHostQueue, data, timestamp, false);
+    // KHWaterMelonMix: block for up to 8ms — enough time for a TCP packet
+    // to arrive from the host over LAN without stalling the emulator long
+    // enough to cause a visible framerate drop. Fully non-blocking caused
+    // CMD frames to be missed and the client to stall in the lobby.
+    return RecvGeneric(RXHostQueue, data, timestamp, true, 0xFFFFFFFF, 6);
 }
 
 
