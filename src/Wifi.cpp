@@ -832,7 +832,10 @@ void Wifi::SendMPDefaultReply()
     *(u16*)&reply[0xC + 0x16] = IOPORT(W_TXSeqNo) << 4;
     *(u32*)&reply[0xC + 0x18] = 0;
 
-    int txlen = Platform::MP_SendReply(reply, 12+28, USTimestamp, IOPORT(W_AIDLow), NDS.UserData);
+    // KHWaterMelonMix: use AID 1 fallback if W_AIDLow is 0
+    u16 defAid = IOPORT(W_AIDLow);
+    if (defAid == 0 && IsMPClient) defAid = 1;
+    int txlen = Platform::MP_SendReply(reply, 12+28, USTimestamp, defAid, NDS.UserData);
     WIFI_LOG("wifi: sent %d/40 bytes of MP default reply\n", txlen);
 }
 
@@ -886,12 +889,16 @@ void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
     }
 
     u16 clientnum = 0;
-    for (int i = 1; i < IOPORT(W_AIDLow); i++)
+    u16 myAID = IOPORT(W_AIDLow);
+    if (myAID == 0 && IsMPClient) myAID = 1;
+    for (int i = 1; i < myAID; i++)
     {
         if (clientmask & (1<<i))
             clientnum++;
     }
-
+    // KHWaterMelonMix: ensure at least 1 slot of time so TXSendFrame
+    // has time to actually send the reply through the relay.
+    if (clientnum == 0 && IsMPClient) clientnum = 1;
     slot->CurPhaseTime = 16 + ((clienttime + 10) * clientnum) + PreambleLen(slot->Rate);
 
     IOPORT(W_TXBusy) |= 0x0080;
