@@ -1768,12 +1768,14 @@ void Wifi::USTimer(u32 param)
             StartRX();
         }
 
-        // KHWaterMelonMix: don't poll for host frames until NextSync has been
-        // set from a real assoc response. NextSync==0 with IsMPClient==true is
-        // a transient state during handshake that causes a premature -1 return.
+        // KHWaterMelonMix: rate-limit CheckRX(2) to once per ~1ms (128 ticks).
+        // USTimer fires every 8us so calling CheckRX(2) every tick blocks
+        // 2083x per frame. The recv thread feeds RXHostQueue asynchronously
+        // so polling faster than ~1ms gives no benefit.
         if (IsMPClient && NextSync != 0 && USTimestamp >= NextSync)
         {
-            CheckRX(2);
+            if (!(USTimestamp & 0x7F & kTimeCheckMask))
+                CheckRX(2);
         }
     }
 
