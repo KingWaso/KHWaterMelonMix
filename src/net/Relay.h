@@ -175,8 +175,8 @@ private:
                          const u8* payload, int payloadLen,
                          int excludeSlot = -1);
     void SendToClient(ClientConn& c, const u8* data, int len);
-    int  RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
-                     bool block, u32 typeFilter = 0xFFFFFFFF);
+    int RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
+                bool block, u32 typeFilter = 0xFFFFFFFF, int timeoutMS = 25);
 };
 
 // ─── RelayClient ─────────────────────────────────────────────────────────────
