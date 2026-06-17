@@ -1768,14 +1768,26 @@ void Wifi::USTimer(u32 param)
             StartRX();
         }
 
-        // KHWaterMelonMix: rate-limit CheckRX(2) to once per ~1ms (128 ticks).
-        // USTimer fires every 8us so calling CheckRX(2) every tick blocks
-        // 2083x per frame. The recv thread feeds RXHostQueue asynchronously
-        // so polling faster than ~1ms gives no benefit.
-        if (IsMPClient && NextSync != 0 && USTimestamp >= NextSync)
+       // KHWaterMelonMix: poll for host frames once we reach NextSync,
+        // then keep polling every 128 ticks (1ms) until a frame arrives
+        // and updates NextSync. Cap how far past NextSync we allow before
+        // giving up — beyond 50ms the host is probably gone.
+        if (IsMPClient && NextSync != 0)
         {
-            if (!(USTimestamp & 0x7F & kTimeCheckMask))
-                CheckRX(2);
+            u64 pollwindow = USTimestamp - NextSync;
+            if (pollwindow < 50000ULL) // within 50ms of expected sync
+            {
+                if (USTimestamp >= NextSync &&
+                    !(USTimestamp & 0x7F & kTimeCheckMask))
+                {
+                    CheckRX(2);
+                }
+            }
+            else
+            {
+                // too far past NextSync — reset so we don't spam polls
+                NextSync = USTimestamp;
+            }
         }
     }
 
