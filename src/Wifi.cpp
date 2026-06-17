@@ -24,6 +24,9 @@
 #include "WifiAP.h"
 #include "Platform.h"
 
+// KHWaterMelonMix: set true by Relay.cpp when relay mode is active
+// so W_CmdReplyTime gets boosted to compensate for TCP routing latency.
+namespace melonDS { bool RelayModeActive = false; }
 
 namespace melonDS
 {
@@ -2120,10 +2123,7 @@ u16 Wifi::Read(u32 addr)
             return ret;
         }
     }
-    // KHWaterMelonMix: set true when relay mode is active so CmdReplyTime
-    // gets boosted to compensate for TCP routing latency.
-    namespace melonDS { bool RelayModeActive = false; }
-   if ((addr & 0xFFF) == W_CmdReplyTime && RelayModeActive)
+    if ((addr & 0xFFF) == W_CmdReplyTime && RelayModeActive)
     {
         u16 val = IOPORT(W_CmdReplyTime);
         return (val < 200) ? 200 : val;
