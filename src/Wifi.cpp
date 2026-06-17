@@ -1796,26 +1796,22 @@ void Wifi::USTimer(u32 param)
             StartRX();
         }
 
-       // KHWaterMelonMix: poll for host frames once we reach NextSync,
-        // then keep polling every 128 ticks (1ms) until a frame arrives
-        // and updates NextSync. Cap how far past NextSync we allow before
-        // giving up — beyond 50ms the host is probably gone.
-        if (IsMPClient && NextSync != 0)
+      if (IsMPClient && NextSync != 0)
         {
-            u64 pollwindow = USTimestamp - NextSync;
-            if (pollwindow < 50000ULL) // within 50ms of expected sync
+            if (USTimestamp >= NextSync)
             {
-                if (USTimestamp >= NextSync &&
-                    !(USTimestamp & 0x7F & kTimeCheckMask))
-                {
+                // We've reached or passed NextSync — poll for host frames
+                // every 128 ticks (1ms) until a new frame updates NextSync.
+                if (!(USTimestamp & 0x7F & kTimeCheckMask))
                     CheckRX(2);
-                }
+
+                // KHWaterMelonMix: if we've gone more than 50ms past
+                // NextSync without receiving anything, nudge NextSync
+                // forward to prevent stale polling.
+                if ((USTimestamp - NextSync) > 50000ULL)
+                    NextSync = USTimestamp;
             }
-            else
-            {
-                // too far past NextSync — reset so we don't spam polls
-                NextSync = USTimestamp;
-            }
+            // if USTimestamp < NextSync, just wait — don't poll yet
         }
     }
 
