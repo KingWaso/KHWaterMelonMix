@@ -1,15 +1,16 @@
 include(FixInterfaceIncludes)
 
 add_library(net-utils STATIC
-    Net.cpp
-    Net_PCap.cpp
-    Net_Slirp.cpp
-    PacketDispatcher.cpp
-    LocalMP.cpp
-    LAN.cpp
-    Netplay.cpp
-    MPInterface.cpp
-)
+        Net.cpp
+        Net_PCap.cpp
+        Net_Slirp.cpp
+        PacketDispatcher.cpp
+        LocalMP.cpp
+        LAN.cpp
+        Netplay.cpp
+        MPInterface.cpp
+        Relay.cpp          # KHWaterMelonMix: built-in relay server
+    )
 
 target_include_directories(net-utils PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
