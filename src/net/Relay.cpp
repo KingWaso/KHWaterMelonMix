@@ -666,7 +666,7 @@ int RelayServer::RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
     if (block)
     {
         // Spin-wait with short sleeps (mirrors LAN.cpp blocking behaviour)
-        u64 deadline = NowUS() + (u64)RecvTimeout * 1000;
+        u64 deadline = NowUS() + 25000ULL; // 25ms timeout
         while (NowUS() < deadline)
         {
             {
@@ -1019,7 +1019,7 @@ int RelayClient::RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
 {
     if (block)
     {
-        u64 deadline = NowUS() + (u64)RecvTimeout * 1000;
+        u64 deadline = NowUS() + 25000ULL; // 25ms timeout
         while (NowUS() < deadline)
         {
             {
