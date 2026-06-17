@@ -69,6 +69,7 @@ set(SOURCES_QT_SDL
 
     LANDialog.cpp
     NetplayDialog.cpp
+    RelayDialog.cpp      # KHWaterMelonMix
 
     plugins/PluginJoystick.cpp
 
