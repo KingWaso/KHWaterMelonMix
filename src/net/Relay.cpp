@@ -993,7 +993,7 @@ int RelayClient::RecvHostPacket(int inst, u8* data, u64* timestamp)
     // return 0 and let the next tick pick it up.
     return RecvGeneric(RXHostQueue, data, timestamp, false);
 }
-}
+
 
 u16 RelayClient::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 {
