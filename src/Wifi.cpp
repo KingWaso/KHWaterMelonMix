@@ -1940,7 +1940,7 @@ void Wifi::USTimer(u32 param)
 
     ScheduleTimer(false);
 }
-
+}
 
 void Wifi::ChangeChannel()
 {
