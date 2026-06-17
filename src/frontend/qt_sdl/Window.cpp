@@ -76,6 +76,8 @@
 #include "Savestate.h"
 #include "MPInterface.h"
 #include "LANDialog.h"
+#include "RelayDialog.h"
+#include "Relay.h"
 
 //#include "main_shaders.h"
 
