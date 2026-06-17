@@ -656,6 +656,22 @@ u16 RelayServer::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 {
     u16 ret = 0;
 
+    // KHWaterMelonMix: wait up to 10ms for reply to arrive through relay.
+    // Only wait if queue is empty — if reply is already here, return instantly.
+    // This is called once per CMD cycle (~100ms) not per timer tick,
+    // so 10ms wait here does not hurt framerate.
+    {
+        u64 deadline = NowUS() + 10000ULL;
+        while (NowUS() < deadline)
+        {
+            {
+                std::lock_guard<std::mutex> lk(RXMutex);
+                if (!RXHostQueue.empty()) break;
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+    }
+
     std::lock_guard<std::mutex> lk(RXMutex);
     while (!RXHostQueue.empty())
     {
