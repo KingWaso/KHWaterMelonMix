@@ -1775,6 +1775,7 @@ void Wifi::USTimer(u32 param)
         {
             CheckRX(2);
         }
+    }
 
     if (!(USTimestamp & 0x3FF & kTimeCheckMask))
         WifiAP->MSTimer();
@@ -1852,7 +1853,10 @@ void Wifi::USTimer(u32 param)
         }
         else
         {
-            if ((!IsMPClient) || (USTimestamp > NextSync))
+            // KHWaterMelonMix: always allow CheckRX(0) for beacon/general packets
+            // so the client can discover the host's game room through the relay.
+            // Only skip if we are a confirmed MP client AND haven't reached NextSync yet.
+            if ((!IsMPClient) || (USTimestamp > NextSync) || (NextSync == 0))
             {
                 if ((!(RXCounter & 0x1FF & kTimeCheckMask)) && (!ComStatus))
                 {
