@@ -23,7 +23,7 @@
 #include "Wifi.h"
 #include "WifiAP.h"
 #include "Platform.h"
-#include "MPInterface.h"
+#include "net/MPInterface.h"
 
 namespace melonDS
 {
