@@ -911,7 +911,7 @@ void RelayClient::RecvLoop()
             if (mptype == 1 || mptype == 3)  // CMD or ACK → host queue
                 RXHostQueue.push(entry);
             else
-                RXQueue.push(entry);
+                RXQueue.push(entry);  // type 0 (beacons/general) and type 2 (replies) → RXQueue
             break;
         }
 
