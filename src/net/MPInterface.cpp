@@ -69,3 +69,4 @@ void MPInterface::Set(MPInterfaceType type)
  
         CurrentType = type;
     }
+}
