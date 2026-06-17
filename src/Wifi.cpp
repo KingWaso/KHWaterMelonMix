@@ -665,7 +665,13 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
 
     case 5:
         IncrementTXCount(slot);
-        Platform::MP_SendReply(TXBuffer, 12+len, USTimestamp, IOPORT(W_AIDLow), NDS.UserData);
+        {
+            // KHWaterMelonMix: use AID 1 if W_AIDLow is 0 but we are
+            // an MP client — relay needs non-zero AID to route reply.
+            u16 aid = IOPORT(W_AIDLow);
+            if (aid == 0 && IsMPClient) aid = 1;
+            Platform::MP_SendReply(TXBuffer, 12+len, USTimestamp, aid, NDS.UserData);
+        }
         break;
 
     case 4:
@@ -1487,17 +1493,21 @@ void Wifi::FinishRX()
         // reply to CMD frames
 
         u16 clientmask = *(u16*)&RXBuffer[0xC + 26];
-        if (IOPORT(W_AIDLow) && (clientmask & (1 << IOPORT(W_AIDLow))))
+        u16 myAID = IOPORT(W_AIDLow);
+
+        // KHWaterMelonMix: if AIDLow is 0 but we are an MP client,
+        // the host assigned us AID 1 by default (single-client session).
+        // Use AID 1 so we send a real reply instead of a blank.
+        if (myAID == 0 && IsMPClient)
+            myAID = 1;
+
+        if (myAID && (clientmask & (1 << myAID)))
         {
             SendMPReply(*(u16*)&RXBuffer[0xC + 24], clientmask);
         }
         else
         {
-            // send a blank
-            // this is just so the host can have something to receive, instead of hitting a timeout
-            // in the case this client wasn't ready to send a reply
-            // TODO: also send this if we have RX disabled
-
+            // send a blank — not in this client mask
             Platform::MP_SendReply(nullptr, 0, USTimestamp, 0, NDS.UserData);
         }
     }
@@ -1675,6 +1685,13 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
 
     IsMP = true;
     IsMPClient = true;
+
+    // KHWaterMelonMix: explicitly set W_AIDLow from the assoc response.
+    // Over the relay the ARM7 firmware may not set this in time, causing
+    // the client to send blank replies instead of real MP replies.
+    if (IOPORT(W_AIDLow) == 0)
+        IOPORT(W_AIDLow) = aid & 0x000F;
+
     // KHWaterMelonMix: only adopt host timestamp if non-zero and ahead of
     // current counter; VPN can deliver assoc responses with timestamp=0
     if (timestamp && timestamp > USTimestamp)
