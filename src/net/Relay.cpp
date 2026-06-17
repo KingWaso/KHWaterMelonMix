@@ -265,7 +265,7 @@ void RelayServer::AcceptLoop()
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(ListenSock, &fds);
-        struct timeval tv = {0, 50000}; // 50ms
+        struct timeval tv = {0, 8000}; // 8ms — matches DS timer interval
         int r = select((int)ListenSock + 1, &fds, nullptr, nullptr, &tv);
 
         if (r > 0 && FD_ISSET(ListenSock, &fds))
@@ -321,7 +321,9 @@ void RelayServer::AcceptLoop()
                 if (c.Sock == INVALID_SOCKET) continue;
                 ServiceClient(c);
             }
-
+            // KHWaterMelonMix: yield after servicing to give emulator
+            // thread priority on Windows where scheduling is coarse.
+            std::this_thread::yield();
             // Remove disconnected clients
             Clients.erase(
                 std::remove_if(Clients.begin(), Clients.end(),
@@ -640,20 +642,6 @@ int RelayServer::RecvHostPacket(int inst, u8* data, u64* timestamp)
 u16 RelayServer::RecvReplies(int inst, u8* packets, u64 timestamp, u16 aidmask)
 {
     u16 ret = 0;
-
-    // KHWaterMelonMix: wait up to 8ms for client replies.
-    // RecvReplies is called once per CMD cycle from ProcessTX, not every
-    // timer tick, so an 8ms wait here doesn't hurt framerate but gives
-    // the relay enough time to route the client's reply back to the host.
-    u64 deadline = NowUS() + 5000ULL;
-    while (NowUS() < deadline)
-    {
-        {
-            std::lock_guard<std::mutex> lk(RXMutex);
-            if (!RXHostQueue.empty()) break;
-        }
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
-    }
 
     std::lock_guard<std::mutex> lk(RXMutex);
     while (!RXHostQueue.empty())
