@@ -36,6 +36,7 @@
 #include "Screen.h"
 #include "Config.h"
 #include "MPInterface.h"
+#include "RelayDialog.h"
 
 #include "MainWindow/MainWindowSettings.h"
 
@@ -198,6 +199,8 @@ private slots:
     void onMPNewInstance();
     void onLANStartHost();
     void onLANStartClient();
+    void onRelayHost();
+    void onRelayJoin();
     void onNPStartHost();
     void onNPStartClient();
     void onNPTest();
@@ -327,6 +330,8 @@ public:
     QAction* actMPNewInstance;
     QAction* actLANStartHost;
     QAction* actLANStartClient;
+    QAction* actRelayHost;
+    QAction* actRelayJoin;
     QAction* actNPStartHost;
     QAction* actNPStartClient;
     QAction* actNPTest;
