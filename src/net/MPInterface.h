@@ -27,12 +27,13 @@ namespace melonDS
 
 // TODO: provision for excluding unwanted interfaces at compile time
 enum MPInterfaceType
-{
-    MPInterface_Dummy = -1,
-    MPInterface_Local,
-    MPInterface_LAN,
-    MPInterface_Netplay,
-};
+    {
+        MPInterface_Dummy = -1,
+        MPInterface_Local,
+        MPInterface_LAN,
+        MPInterface_Netplay,
+        MPInterface_Relay,      // KHWaterMelonMix: built-in relay server
+    };
 
 struct MPPacketHeader
 {
