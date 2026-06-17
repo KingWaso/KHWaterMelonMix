@@ -1002,11 +1002,10 @@ int RelayClient::SendAck(int inst, u8* data, int len, u64 timestamp)
 
 int RelayClient::RecvHostPacket(int inst, u8* data, u64* timestamp)
 {
-    // KHWaterMelonMix: block for up to 8ms — enough time for a TCP packet
-    // to arrive from the host over LAN without stalling the emulator long
-    // enough to cause a visible framerate drop. Fully non-blocking caused
-    // CMD frames to be missed and the client to stall in the lobby.
-    return RecvGeneric(RXHostQueue, data, timestamp, true, 0xFFFFFFFF, 6);
+    // KHWaterMelonMix: must be non-blocking. USTimer calls this up to
+    // 2083 times per frame (every 8us). Any blocking multiplies directly
+    // into frame time. The recv thread populates RXHostQueue asynchronously.
+    return RecvGeneric(RXHostQueue, data, timestamp, false);
 }
 
 
