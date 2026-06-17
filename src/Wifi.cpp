@@ -23,7 +23,7 @@
 #include "Wifi.h"
 #include "WifiAP.h"
 #include "Platform.h"
-#include "net/MPInterface.h"
+
 
 namespace melonDS
 {
@@ -2120,16 +2120,13 @@ u16 Wifi::Read(u32 addr)
             return ret;
         }
     }
-    // KHWaterMelonMix: boost CmdReplyTime when using relay to compensate
-    // for TCP routing latency. The default window (10+val)*8us is ~80us
-    // which is too tight for a relay hop. Boosting to 200 gives ~1.68ms.
-    if ((addr & 0xFFF) == W_CmdReplyTime)
+    // KHWaterMelonMix: set true when relay mode is active so CmdReplyTime
+    // gets boosted to compensate for TCP routing latency.
+    namespace melonDS { bool RelayModeActive = false; }
+   if ((addr & 0xFFF) == W_CmdReplyTime && RelayModeActive)
     {
-        if (melonDS::MPInterface::GetType() == melonDS::MPInterface_Relay)
-        {
-            u16 val = IOPORT(W_CmdReplyTime);
-            return (val < 200) ? 200 : val;
-        }
+        u16 val = IOPORT(W_CmdReplyTime);
+        return (val < 200) ? 200 : val;
     }
 
     return IOPORT(addr&0xFFF);
