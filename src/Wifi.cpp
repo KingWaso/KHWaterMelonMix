@@ -1944,8 +1944,6 @@ void Wifi::USTimer(u32 param)
 
     ScheduleTimer(false);
 }
-}
-
 void Wifi::ChangeChannel()
 {
     u32 val1 = RFRegs[RFChannelIndex[0]];
