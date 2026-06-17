@@ -585,8 +585,6 @@ void PluginKingdomHeartsDays::onLoadROM() {
         }
     }
     cutscenesAddressOffset = firstCutsceneAddr - getMobiCutsceneAddress(&Cutscenes[0]);
-    // KHWaterMelonMix: reset WiFi patch flag on ROM load
-    _wifiPatchesApplied = false;
 }
 
 void PluginKingdomHeartsDays::onLoadState() {
@@ -611,62 +609,6 @@ std::string PluginKingdomHeartsDays::tomlUniqueIdentifier() {
 
 void PluginKingdomHeartsDays::renderer_beforeBuildingShapes()
 {
-    // KHWaterMelonMix: ARM7 WiFi patches for VPN multiplayer
-    // Apply once after ARM7 binary is confirmed loaded in RAM
-    if (!_wifiPatchesApplied)
-    {
-        // Fingerprint check: first ARM7 instruction = MOV r12,#0x4000000
-        if (nds->ARM7Read32(0x02380000) == 0xE3A0C301)
-        {
-            // P1: MP session timeout 60->180 frames
-            nds->ARM7Write32(0x0239449C, 0xE3A000B4);
-            // P2: Child send size A - close forbidden zone
-            nds->ARM7Write32(0x02397D0C, 0xE35100BF);
-            // P3: Child send size A - NOP upper bound load
-            nds->ARM7Write32(0x02397D18, 0xE1A00000);
-            // P4: Child send size A - NOP upper bound branch
-            nds->ARM7Write32(0x02397D1C, 0xE1A00000);
-            // P5: Child send size B - close forbidden zone
-            nds->ARM7Write32(0x02397D40, 0xE35100BF);
-            // P6: Child send size B - NOP upper bound load
-            nds->ARM7Write32(0x02397D4C, 0xE1A00000);
-            // P7: Child send size B - NOP upper bound branch
-            nds->ARM7Write32(0x02397D50, 0xE1A00000);
-            // P8: Channel bitmap validation bypass
-            nds->ARM7Write32(0x0239431C, 0xE1A00000);
-            // P9: WM state gate bypass
-            nds->ARM7Write32(0x02394478, 0xE1A00000);
-            // P10: Post-start verify force success
-            nds->ARM7Write32(0x02394590, 0xEA00005E);
-            // P11: HW register write-verify suppress error
-            nds->ARM7Write32(0x0239AA28, 0xEA000005);
-
-            _wifiPatchesApplied = true;
-        }
-    }
-
-    // KHWaterMelonMix: force WM accept flag when parent is in MP state
-    // WM state block pointer: *(*0x027F8878 + 0x550)
-    if (_wifiPatchesApplied)
-    {
-        u32 globalBase = nds->ARM7Read32(0x027F8878);
-        if (globalBase != 0)
-        {
-            u32 wmPtr = nds->ARM7Read32(globalBase + 0x550);
-            if (wmPtr != 0)
-            {
-                u16 wmState = nds->ARM7Read16(wmPtr);
-                if (wmState == 0x08 || wmState == 0x0A)
-                {
-                    u32 acceptFlag = nds->ARM7Read32(wmPtr + 0x0C);
-                    if (acceptFlag == 0)
-                        nds->ARM7Write32(wmPtr + 0x0C, 1);
-                }
-            }
-        }
-    }
-
-    // original function content follows:
     if (GameScene == gameScene_InGameWithDouble3D)
     {
         bool has3DOnTopScreen = (nds->PowerControl9 >> 15) == 1;
