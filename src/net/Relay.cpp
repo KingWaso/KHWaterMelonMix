@@ -16,9 +16,9 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
-#include "Wifi.h"
 #include "Relay.h"
 #include "Platform.h"
+#include "Wifi.h"
 
 #include <cstring>
 #include <cstdio>
@@ -1108,8 +1108,8 @@ bool Relay::HostGame(const char* playerName, int maxPlayers)
         delete Server;
         Server = nullptr;
         return false;
-        melonDS::RelayModeActive = true;
     }
+    melonDS::RelayModeActive = true;
     return true;
 }
 
@@ -1121,13 +1121,13 @@ bool Relay::JoinGame(const char* playerName, const char* hostIP,
     RoomCode[6] = '\0';
 
     Client = new RelayClient();
-    if (!Client->Connect(hostIP, kRelayPort, roomCode, playerName))
+   if (!Client->Connect(hostIP, kRelayPort, roomCode, playerName))
     {
         delete Client;
         Client = nullptr;
         return false;
-        melonDS::RelayModeActive = true;
     }
+    melonDS::RelayModeActive = true;
     return true;
 }
 
