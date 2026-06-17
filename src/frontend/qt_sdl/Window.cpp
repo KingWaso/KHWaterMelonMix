@@ -468,9 +468,18 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
 
                 actLANStartHost = submenu->addAction("Host LAN game");
                 connect(actLANStartHost, &QAction::triggered, this, &MainWindow::onLANStartHost);
-
+ 
                 actLANStartClient = submenu->addAction("Join LAN game");
                 connect(actLANStartClient, &QAction::triggered, this, &MainWindow::onLANStartClient);
+ 
+                submenu->addSeparator();
+ 
+                // KHWaterMelonMix: relay-based online play (no VPN needed)
+                actRelayHost = submenu->addAction("Host Game (Online)");
+                connect(actRelayHost, &QAction::triggered, this, &MainWindow::onRelayHost);
+ 
+                actRelayJoin = submenu->addAction("Join Game (Online)");
+                connect(actRelayJoin, &QAction::triggered, this, &MainWindow::onRelayJoin);
 
                 /*submenu->addSeparator();
 
@@ -1853,7 +1862,15 @@ void MainWindow::onLANStartClient()
     if (!lanWarning(false)) return;
     LANStartClientDialog::openDlg(this);
 }
-
+void MainWindow::onRelayHost()
+    {
+        RelayHostDialog::openDlg(this);
+    }
+ 
+    void MainWindow::onRelayJoin()
+    {
+        RelayClientDialog::openDlg(this);
+    }
 void MainWindow::onNPStartHost()
 {
     //Netplay::StartHost();
@@ -1882,6 +1899,8 @@ void MainWindow::updateMPInterface(MPInterfaceType type)
     actMPNewInstance->setEnabled(enable);
     actLANStartHost->setEnabled(enable);
     actLANStartClient->setEnabled(enable);
+    actRelayHost->setEnabled(enable);
+    actRelayJoin->setEnabled(enable);
     /*actNPStartHost->setEnabled(enable);
     actNPStartClient->setEnabled(enable);
     actNPTest->setEnabled(enable);*/
