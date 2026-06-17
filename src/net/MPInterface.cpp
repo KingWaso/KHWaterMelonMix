@@ -19,6 +19,7 @@
 #include "MPInterface.h"
 #include "LocalMP.h"
 #include "LAN.h"
+#include "Relay.h"
 
 namespace melonDS
 {
@@ -46,23 +47,25 @@ MPInterfaceType MPInterface::CurrentType = MPInterface_Dummy;
 
 
 void MPInterface::Set(MPInterfaceType type)
-{
-    switch (type)
     {
-    case MPInterface_Local:
-        Current = std::make_unique<LocalMP>();
-        break;
-
-    case MPInterface_LAN:
-        Current = std::make_unique<LAN>();
-        break;
-
-    default:
-        Current = std::make_unique<DummyMP>();
-        break;
+        switch (type)
+        {
+        case MPInterface_Local:
+            Current = std::make_unique<LocalMP>();
+            break;
+ 
+        case MPInterface_LAN:
+            Current = std::make_unique<LAN>();
+            break;
+ 
+        case MPInterface_Relay:
+            Current = std::make_unique<Relay>();
+            break;
+ 
+        default:
+            Current = std::make_unique<DummyMP>();
+            break;
+        }
+ 
+        CurrentType = type;
     }
-
-    CurrentType = type;
-}
-
-}
