@@ -293,5 +293,8 @@ private:
     void RFTransfer_Type3();
 };
 
+// KHWaterMelonMix: relay mode flag, defined in Wifi.cpp, set by Relay.cpp
+extern bool RelayModeActive;
+
 }
 #endif
