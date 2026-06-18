@@ -1626,11 +1626,19 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
         }
 
         chan = RXBuffer[9];
-        if (chan != CurChannel || CurChannel == 0)
+        // KHWaterMelonMix: skip channel check for relay MP host frames
+        // (type 2). CurChannel may be 0 on the client if RF registers
+        // haven't been programmed yet, but the relay already validates
+        // routing so the channel check is redundant and kills all frames.
+        bool skipChannelCheck = (type == 2);
+        if (!skipChannelCheck && (chan != CurChannel || CurChannel == 0))
         {
             Log(LogLevel::Debug, "received frame but bad channel %d (expected %d)\n", chan, CurChannel);
             continue;
         }
+        // For type 2, adopt the host's channel if ours is unset
+        if (type == 2 && CurChannel == 0 && chan != 0)
+            CurChannel = chan;
 
         // hack: ignore MP frames if not engaged in a MP comm
         if (type == 0 && (!IsMP))
