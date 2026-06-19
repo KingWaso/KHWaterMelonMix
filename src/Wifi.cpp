@@ -188,7 +188,14 @@ void Wifi::Reset()
         }
     }
 
-    CurChannel = 0;
+    // KHWaterMelonMix: default to channel 1 instead of 0 when relay mode
+// could be active. CurChannel==0 blocks ALL packet transmission
+// (TXSendFrame returns early), so games whose RF programming sequence
+// hasn't run yet (e.g. immediately after "Host Game") would never send
+// even a single beacon over the relay. Real hardware always has SOME
+// channel selected; defaulting to 1 mirrors that and is overwritten by
+// ChangeChannel() once the game programs real RF values.
+CurChannel = 1;
 
     Firmware::FirmwareConsoleType console = fwheader.ConsoleType;
     if (console == Firmware::FirmwareConsoleType::DS)
@@ -649,7 +656,16 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
     if (noseqno == 2)
         *(u16*)&TXBuffer[0xC] |= (1<<11);
 
-    if (CurChannel == 0) return;
+    // KHWaterMelonMix: never let CurChannel==0 silently drop packets when
+    // relay mode is active — fall back to channel 1 so beacons/CMD frames
+    // still reach the relay even if RF registers haven't been programmed.
+    if (CurChannel == 0)
+    {
+        if (RelayModeActive)
+            CurChannel = 1;
+        else
+            return;
+    }
     TXBuffer[9] = CurChannel;
 
     switch (num)
@@ -1999,9 +2015,19 @@ void Wifi::ChangeChannel()
     }
 
     if (CurChannel > 0)
+    {
         Log(LogLevel::Debug, "wifi: switching to channel %d\n", CurChannel);
+    }
     else
+    {
         Log(LogLevel::Debug, "wifi: invalid channel values %05X:%05X\n", val1, val2);
+
+        // KHWaterMelonMix: don't let an unrecognized RF programming
+        // sequence leave CurChannel stuck at 0 in relay mode — that
+        // silently blocks all TX. Fall back to channel 1.
+        if (RelayModeActive)
+            CurChannel = 1;
+    }
 }
 
 void Wifi::RFTransfer_Type2()
