@@ -20,34 +20,54 @@
 #define RELAY_H
 
 /*
- * Relay.h — KHWaterMelonMix built-in relay server + client
+ * Relay.h — KHWaterMelonMix built-in relay server + client (v2)
  *
- * Architecture:
- *   HOST path:
- *     1. RelayServer thread starts inside the host's emulator process.
- *     2. It listens on a random TCP port (default range 7100-7200).
- *     3. A random 6-digit room code is generated and shown to the host.
- *     4. The host shares their IP + code with friends out-of-band.
- *     5. The server accepts client TCP connections, validates the room
- *        code in the handshake, then routes all MP packets between peers.
+ * Design principles (PPSSPP-inspired):
  *
- *   CLIENT path:
- *     1. User enters host IP + 6-digit code.
- *     2. RelayClient connects to host IP:port (port is embedded in code
- *        or fixed), sends the room code for validation.
- *     3. Server ACKs and assigns a player slot.
- *     4. All subsequent MP frames go through the relay server.
+ *  1. SEPARATE CONTROL FROM DATA
+ *     The TCP connection handles both handshake (control) and MP packets
+ *     (data), but they are processed on separate threads so the control
+ *     handshake never blocks the emulator's Wifi timer thread.
  *
- * The Relay class implements MPInterface so it drops in exactly like LAN.
+ *  2. PEER TABLE (like PPSSPP's `friends` list)
+ *     Every connected peer is tracked in a PeerInfo table keyed by AID
+ *     (the DS association ID, 1..15). All routing decisions go through
+ *     this table. Unknown peers are logged and discarded, never crash.
+ *
+ *  3. FULLY ASYNC RECEIVE (like PPSSPP's `friendFinder` thread)
+ *     Each client connection gets a dedicated RecvWorker thread that reads
+ *     from the TCP socket and pushes into a thread-safe RXQueue. The Wifi
+ *     timer thread only reads from that queue — it never blocks on I/O.
+ *
+ *  4. NEVER BLOCK THE WIFI THREAD
+ *     USTimer fires every 8µs (kTimerInterval). Any blocking call in
+ *     RecvHostPacket multiplies: 1ms × 2083 calls/frame = 2083ms/frame.
+ *     Every function callable from Wifi.cpp is non-blocking.
+ *
+ *  5. DS-SPECIFIC: HONOUR THE CMD REPLY WINDOW
+ *     Unlike PSP adhoc (connectionless, loss-tolerant), DS local MP has a
+ *     hardware-enforced host-CMD → client-reply lockstep. The relay routes
+ *     reply packets to the host's RXHostQueue as fast as possible so they
+ *     arrive before the host's ProcessTX phase-2 window expires.
+ *     RecvReplies() on the host side waits up to one CMD cycle for replies.
+ *
+ *  6. CHANNEL BYPASS
+ *     The DS wifi stack normally drops frames whose channel doesn't match
+ *     CurChannel. Over the relay, CurChannel on the client may be 0 at
+ *     first. Relay packets carry the host's channel; the client adopts it
+ *     on first reception. Wifi.cpp skips the channel check for relay frames.
  */
 
 #include <string>
 #include <vector>
 #include <queue>
+#include <deque>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
-#include <functional>
+#include <chrono>
+#include <cstdint>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -59,9 +79,12 @@
     #include <arpa/inet.h>
     #include <unistd.h>
     typedef int socket_t;
-    #define INVALID_SOCKET (-1)
-    #define SOCKET_ERROR   (-1)
-    #define closesocket    close
+    #ifndef INVALID_SOCKET
+        #define INVALID_SOCKET (-1)
+    #endif
+    #ifndef closesocket
+        #define closesocket close
+    #endif
 #endif
 
 #include "types.h"
@@ -70,44 +93,84 @@
 namespace melonDS
 {
 
-// ─── Wire protocol ────────────────────────────────────────────────────────────
-// Every TCP message starts with this fixed-size header followed by `Length`
-// bytes of payload.
+// ─── Wire protocol ─────────────────────────────────────────────────────────
+// Every TCP message: RelayMsgHeader (12 bytes) + payload (Length bytes).
+// All multi-byte fields are native byte order (both peers run the emulator).
 
 const u32 kRelayMagic   = 0x584D484B; // 'KHMX'
-const u32 kRelayVersion = 1;
-const int kRelayPort    = 7100;       // fixed port; clients always connect here
+const u32 kRelayVersion = 2;           // bump from v1 to distinguish rebuilds
+const int kRelayPort    = 7100;
 
 enum RelayMsgType : u32
 {
-    RMsg_Hello      = 1,  // client → server: { magic, version, code[6], name[32] }
-    RMsg_HelloAck   = 2,  // server → client: { playerID (u8), numPlayers (u8) }
-    RMsg_HelloNak   = 3,  // server → client: rejected (bad code / full)
-    RMsg_PlayerList = 4,  // server → all:   { count, Player[count] }
-    RMsg_MPPacket   = 5,  // any    → server → others: MPPacketHeader + data
-    RMsg_Disconnect = 6,  // server → all:   { playerID }
+    // Handshake (control plane)
+    RMsg_Hello      = 1,   // client→server: HelloPayload
+    RMsg_HelloAck   = 2,   // server→client: HelloAckPayload
+    RMsg_HelloNak   = 3,   // server→client: empty (bad code / full)
+
+    // Session management (control plane)
+    RMsg_PlayerList = 4,   // server→all: PlayerListPayload
+    RMsg_Disconnect = 6,   // either direction: empty
+
+    // DS MP data plane
+    // Payload = MPPacketHeader (from MPInterface.h) + frame data
+    RMsg_MPPacket   = 5,
 };
 
 struct RelayMsgHeader
 {
-    u32 Magic;      // kRelayMagic
-    u32 Type;       // RelayMsgType
-    u32 Length;     // bytes following this header
+    u32 Magic;    // kRelayMagic
+    u32 Type;     // RelayMsgType
+    u32 Length;   // bytes of payload after this header
 };
 
-// ─── Relay player info ────────────────────────────────────────────────────────
-
-struct RelayPlayer
+// Handshake payloads
+struct RelayHelloPayload
 {
-    int      ID;
-    char     Name[32];
-    bool     Connected;  // fully handshaked
-    u32      Address;    // remote IPv4 (network byte order)
-    u32      Ping;
+    u32  Magic;      // kRelayMagic (redundant check)
+    u32  Version;    // kRelayVersion
+    char Code[6];    // room code (ASCII digits, not NUL-terminated)
+    char Name[32];   // player display name (NUL-terminated)
 };
 
-// ─── RelayServer ─────────────────────────────────────────────────────────────
-// Runs inside the HOST's emulator process as a background thread.
+struct RelayHelloAckPayload
+{
+    u8 PlayerID;    // AID assigned by server (1..15)
+    u8 MaxPlayers;  // max slots for this session
+    u8 HostChannel; // DS wifi channel the host is using (0 = unknown)
+    u8 _pad;
+};
+
+// ─── Peer info ─────────────────────────────────────────────────────────────
+// Mirrors PPSSPP's SceNetAdhocctlPeerInfo / friends list.
+// Keyed by AID (1..15). AID 0 = host (always present on server side).
+
+struct RelayPeer
+{
+    int      AID;           // 1..15 (0 = host slot, local only)
+    char     Name[32];      // display name
+    bool     Connected;     // fully handshaked and active
+    u32      Address;       // remote IPv4 (network byte order), 0 = local
+    u32      Ping;          // last measured RTT in ms
+    u64      LastRecvUS;    // wall-clock µs of last received packet
+};
+
+// ─── RX queue entry ────────────────────────────────────────────────────────
+struct RelayRXEntry
+{
+    std::vector<u8> Data;       // frame payload (after MPPacketHeader)
+    u64             Timestamp;  // DS USTimestamp from sender
+    u32             Type;       // MPPacketHeader::Type (full word, AID in high 16)
+    u16             Aid;        // extracted AID (Type >> 16)
+    int             SenderAID;  // which peer sent this
+};
+
+// ─── RelayServer ───────────────────────────────────────────────────────────
+// Runs inside the HOST's emulator process.
+// AcceptThread: select() on ListenSock + all client sockets, 1ms timeout.
+// Per-client RecvWorker threads are NOT used server-side; instead the
+// AcceptThread services all clients via a single select() loop, giving
+// us PPSSPP-style "non-blocking poll" without per-thread overhead.
 
 class RelayServer
 {
@@ -115,72 +178,77 @@ public:
     RelayServer();
     ~RelayServer();
 
-    // Start listening. roomCode must be exactly 6 ASCII digits.
-    // maxPlayers: 2..16. Returns false on bind failure.
-    bool Start(const char* roomCode, const char* hostName, int maxPlayers);
+    bool Start(const char* roomCode, const char* hostName,
+               int maxPlayers, u8 hostChannel);
     void Stop();
 
-    bool IsRunning() const { return Running; }
+    bool IsRunning() const { return Running.load(); }
     int  GetPort()   const { return Port; }
+    u8   GetChannel() const { return HostChannel; }
 
-    // Called by the Relay MPInterface every video frame
-    void Process();
+    void Process();  // called from emulator main thread each video frame
 
-    std::vector<RelayPlayer> GetPlayerList();
+    std::vector<RelayPeer> GetPeerList();
     int GetNumPlayers();
     int GetMaxPlayers() { return MaxPlayers; }
 
-    // Packet injection: the host's own Wifi.cpp calls these via MPInterface
-    // (same signatures as LAN / LocalMP)
-    int  SendPacket   (int inst, u8* data, int len, u64 timestamp);
-    int  RecvPacket   (int inst, u8* data, u64* timestamp);
-    int  SendCmd      (int inst, u8* data, int len, u64 timestamp);
-    int  SendReply    (int inst, u8* data, int len, u64 timestamp, u16 aid);
-    int  SendAck      (int inst, u8* data, int len, u64 timestamp);
+    // Called from Wifi.cpp via MPInterface (all non-blocking)
+    int  SendPacket    (int inst, u8* data, int len, u64 timestamp);
+    int  RecvPacket    (int inst, u8* data, u64* timestamp);
+    int  SendCmd       (int inst, u8* data, int len, u64 timestamp);
+    int  SendReply     (int inst, u8* data, int len, u64 timestamp, u16 aid);
+    int  SendAck       (int inst, u8* data, int len, u64 timestamp);
     int  RecvHostPacket(int inst, u8* data, u64* timestamp);
-    u16  RecvReplies  (int inst, u8* data, u64 timestamp, u16 aidmask);
+    u16  RecvReplies   (int inst, u8* packets, u64 timestamp, u16 aidmask);
 
 private:
+    // ── Per-connection state ──────────────────────────────────────────────
     struct ClientConn
     {
-        socket_t Sock;
-        RelayPlayer Player;
-        bool Handshaked;
-        std::vector<u8> RecvBuf;
-        u32 Ping;
+        socket_t   Sock       = (socket_t)INVALID_SOCKET;
+        RelayPeer  Peer       = {};
+        bool       Handshaked = false;
     };
 
-    socket_t       ListenSock;
-    int            Port;
-    int            MaxPlayers;
-    char           RoomCode[7];   // 6 digits + NUL
-    char           HostName[32];
+    socket_t              ListenSock;
+    int                   Port;
+    int                   MaxPlayers;
+    u8                    HostChannel;
+    char                  RoomCode[7];
+    char                  HostName[32];
 
-    std::atomic<bool>       Running;
-    std::thread             AcceptThread;
-    std::mutex              ClientsMutex;
-    std::vector<ClientConn> Clients;   // index 0 = slot reserved for host
+    std::atomic<bool>     Running;
+    std::thread           AcceptThread;
 
-    // RX queues for the host's Wifi stack (same shape as LAN.cpp)
-    std::mutex              RXMutex;
-    struct RXEntry { std::vector<u8> Data; u64 Timestamp; u32 Type; u16 Aid; };
-    std::queue<RXEntry>     RXQueue;
-    std::queue<RXEntry>     RXHostQueue;  // replies destined for host (type 2)
+    // ClientsMutex guards Clients vector and all Peer fields
+    std::mutex            ClientsMutex;
+    std::vector<ClientConn> Clients;
 
+    // RX queues (written by AcceptThread, read by Wifi timer thread)
+    std::mutex            RXMutex;
+    std::queue<RelayRXEntry> RXQueue;      // general frames (type 0)
+    std::queue<RelayRXEntry> RXHostQueue;  // client replies (type 2)
+
+    // ── Internal methods ─────────────────────────────────────────────────
     void AcceptLoop();
-    void ServiceClient(ClientConn& c);
     bool DoHandshake(ClientConn& c);
+    void ServiceClient(ClientConn& c);
+    void DispatchMPPacket(ClientConn& sender,
+                          const u8* payload, u32 len);
+
     void BroadcastPlayerList();
-    void BroadcastPacket(const u8* header, int headerLen,
-                         const u8* payload, int payloadLen,
-                         int excludeSlot = -1);
-    void SendToClient(ClientConn& c, const u8* data, int len);
-    int RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
-                bool block, u32 typeFilter = 0xFFFFFFFF, int timeoutMS = 25);
+    void BroadcastRaw(const u8* data, int len, int excludeAID = -1);
+    bool SendRaw(socket_t s, const u8* data, int len);
+
+    // Non-blocking queue drain (called from Wifi timer thread only)
+    int  DequeueRX(std::queue<RelayRXEntry>& q,
+                   u8* data, u64* timestamp);
 };
 
-// ─── RelayClient ─────────────────────────────────────────────────────────────
-// Runs inside the CLIENT's emulator process.
+// ─── RelayClient ───────────────────────────────────────────────────────────
+// Runs inside each CLIENT's emulator process.
+// RecvThread: blocking reads on the TCP socket, pushes to RXQueues.
+// All methods called from Wifi.cpp are non-blocking queue reads.
 
 class RelayClient
 {
@@ -188,53 +256,63 @@ public:
     RelayClient();
     ~RelayClient();
 
-    // Connect to host. Returns false on failure.
     bool Connect(const char* hostIP, int port,
                  const char* roomCode, const char* playerName);
     void Disconnect();
 
-    bool IsConnected() const { return Connected; }
+    bool IsConnected()  const { return Connected.load(); }
+    int  GetMyAID()     const { return MyAID; }
+    int  GetMaxPlayers() const { return MaxPlayers; }
+    u8   GetHostChannel() const { return HostChannel; }
 
     void Process();
 
-    std::vector<RelayPlayer> GetPlayerList();
-    int GetNumPlayers()  { return (int)Players.size(); }
-    int GetMaxPlayers()  { return MaxPlayers; }
+    std::vector<RelayPeer> GetPeerList();
+    int GetNumPlayers();
 
-    // MPInterface hooks
-    int  SendPacket   (int inst, u8* data, int len, u64 timestamp);
-    int  RecvPacket   (int inst, u8* data, u64* timestamp);
-    int  SendCmd      (int inst, u8* data, int len, u64 timestamp);
-    int  SendReply    (int inst, u8* data, int len, u64 timestamp, u16 aid);
-    int  SendAck      (int inst, u8* data, int len, u64 timestamp);
+    // Called from Wifi.cpp via MPInterface (all non-blocking)
+    int  SendPacket    (int inst, u8* data, int len, u64 timestamp);
+    int  RecvPacket    (int inst, u8* data, u64* timestamp);
+    int  SendCmd       (int inst, u8* data, int len, u64 timestamp);
+    int  SendReply     (int inst, u8* data, int len, u64 timestamp, u16 aid);
+    int  SendAck       (int inst, u8* data, int len, u64 timestamp);
     int  RecvHostPacket(int inst, u8* data, u64* timestamp);
-    u16  RecvReplies  (int inst, u8* data, u64 timestamp, u16 aidmask);
+    u16  RecvReplies   (int inst, u8* packets, u64 timestamp, u16 aidmask);
 
 private:
-    socket_t             Sock;
-    std::atomic<bool>    Connected;
-    int                  MaxPlayers;
-    int                  MyPlayerID;
+    socket_t              Sock;
+    std::atomic<bool>     Connected;
+    int                   MyAID;
+    int                   MaxPlayers;
+    u8                    HostChannel;
 
-    std::thread          RecvThread;
-    std::mutex           PlayersMutex;
-    std::vector<RelayPlayer> Players;
+    // RecvThread: blocking reads from Sock, pushes to RXQueues
+    std::thread           RecvThread;
 
-    std::mutex           RXMutex;
-    struct RXEntry { std::vector<u8> Data; u64 Timestamp; u32 Type; u16 Aid; };
-    std::queue<RXEntry>  RXQueue;
-    std::queue<RXEntry>  RXHostQueue;
+    // Peer table (mirrors PPSSPP friends list)
+    std::mutex            PeersMutex;
+    std::vector<RelayPeer> Peers;
 
+    // RX queues (written by RecvThread, read by Wifi timer thread)
+    std::mutex            RXMutex;
+    std::queue<RelayRXEntry> RXQueue;      // beacons, general (type 0)
+    std::queue<RelayRXEntry> RXHostQueue;  // CMD + ACK from host (type 1,3)
+
+    // SendMutex protects all sends to Sock from Wifi timer thread
+    std::mutex            SendMutex;
+
+    // ── Internal methods ─────────────────────────────────────────────────
     void RecvLoop();
-    bool SendMsg(u32 type, const u8* payload, int len);
-    int RecvGeneric(std::queue<RXEntry>& q, u8* data, u64* timestamp,
-                bool block, u32 typeFilter = 0xFFFFFFFF, int timeoutMS = 25);
+    bool SendRaw(const u8* data, int len);
+    bool SendMP(u32 mpType, u8* data, int len, u64 timestamp);
+
+    int  DequeueRX(std::queue<RelayRXEntry>& q,
+                   u8* data, u64* timestamp);
 };
 
-// ─── Relay MPInterface ────────────────────────────────────────────────────────
-// The single class that Wifi.cpp talks to.
-// When hosting:  owns a RelayServer + a thin host-side relay connection.
-// When joining:  owns a RelayClient.
+// ─── Relay MPInterface ─────────────────────────────────────────────────────
+// The class Wifi.cpp talks to via Platform::MP_* calls.
+// Owns either a RelayServer (hosting) or RelayClient (joining).
 
 class Relay : public MPInterface
 {
@@ -242,55 +320,51 @@ public:
     Relay() noexcept;
     ~Relay() noexcept override;
 
-    // Host a game. Generates a 6-digit code internally.
-    // Returns false if the server couldn't bind.
+    // UI entry points
     bool HostGame(const char* playerName, int maxPlayers);
-
-    // Join a game.
     bool JoinGame(const char* playerName, const char* hostIP,
                   const char* roomCode);
-
     void EndSession();
 
-    bool IsHosting()   const { return Server != nullptr; }
-    bool IsConnected() const;
+    bool IsHosting()    const { return Server != nullptr; }
+    bool IsConnected()  const;
 
-    // The 6-digit room code (valid after HostGame succeeds)
     const char* GetRoomCode() const { return RoomCode; }
     int         GetPort()     const;
+    int         GetMyAID()    const;
 
-    std::vector<RelayPlayer> GetPlayerList();
+    std::vector<RelayPeer> GetPeerList();
     int GetNumPlayers();
     int GetMaxPlayers();
 
-    // MPInterface
+    // MPInterface implementation
     void Process() override;
     void Begin(int inst) override;
-    void End(int inst) override;
+    void End(int inst)   override;
 
-    int  SendPacket   (int inst, u8* data, int len, u64 timestamp) override;
-    int  RecvPacket   (int inst, u8* data, u64* timestamp) override;
-    int  SendCmd      (int inst, u8* data, int len, u64 timestamp) override;
-    int  SendReply    (int inst, u8* data, int len, u64 timestamp, u16 aid) override;
-    int  SendAck      (int inst, u8* data, int len, u64 timestamp) override;
-    int  RecvHostPacket(int inst, u8* data, u64* timestamp) override;
-    u16  RecvReplies  (int inst, u8* data, u64 timestamp, u16 aidmask) override;
+    int  SendPacket    (int inst, u8* data, int len, u64 timestamp) override;
+    int  RecvPacket    (int inst, u8* data, u64* timestamp)         override;
+    int  SendCmd       (int inst, u8* data, int len, u64 timestamp) override;
+    int  SendReply     (int inst, u8* data, int len, u64 timestamp, u16 aid) override;
+    int  SendAck       (int inst, u8* data, int len, u64 timestamp) override;
+    int  RecvHostPacket(int inst, u8* data, u64* timestamp)         override;
+    u16  RecvReplies   (int inst, u8* packets, u64 timestamp, u16 aidmask)   override;
 
 private:
-    char RoomCode[7];
-
-    // Exactly one of these is non-null at a time
-    RelayServer* Server;
-    RelayClient* Client;
+    char          RoomCode[7];
+    RelayServer*  Server;
+    RelayClient*  Client;
 
     static std::string GenerateCode();
 };
 
-// ─── Utility ──────────────────────────────────────────────────────────────────
-// Get the machine's primary outbound IPv4 as a dotted-decimal string.
-// Used by the UI to display "Your IP address: x.x.x.x" to the host.
+// ─── Utility ───────────────────────────────────────────────────────────────
+// Returns the machine's primary outbound IPv4 as a dotted-decimal string.
 std::string GetLocalIPAddress();
 
-} // namespace melonDS
+// Set by Relay when a session is active; read by Wifi.cpp to bypass
+// the channel check and boost W_CmdReplyTime.
+extern bool RelayModeActive;
 
+} // namespace melonDS
 #endif // RELAY_H
