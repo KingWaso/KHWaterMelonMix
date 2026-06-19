@@ -293,7 +293,7 @@ void RelaySessionDialog::doUpdatePlayerList()
     {
         const auto& p = players[i];
 
-        model->item(i,0)->setText(QString("%1/%2").arg(p.ID+1).arg(maxplayers));
+        model->item(i,0)->setText(QString("%1/%2").arg(p.AID+1).arg(maxplayers));
         model->item(i,1)->setText(QString::fromLatin1(p.Name));
         model->item(i,2)->setText(p.Connected ? "Connected" : "Disconnected");
         model->item(i,3)->setText(p.Ping > 0 ? QString("%1 ms").arg(p.Ping) : "-");
