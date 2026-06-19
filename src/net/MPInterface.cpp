@@ -46,7 +46,7 @@ std::unique_ptr<MPInterface> MPInterface::Current(std::make_unique<DummyMP>());
 MPInterfaceType MPInterface::CurrentType = MPInterface_Dummy;
 
 
-void MPInterface::Set(MPInterfaceType type)
+ void MPInterface::Set(MPInterfaceType type)
     {
         switch (type)
         {
