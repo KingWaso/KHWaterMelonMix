@@ -1813,8 +1813,6 @@ void Wifi::USTimer(u32 param)
             if ((USTimestamp - NextSync) > 50000ULL)
                 NextSync = USTimestamp;
         }
-            // if USTimestamp < NextSync, just wait — don't poll yet
-        }
     }
 
     if (!(USTimestamp & 0x3FF & kTimeCheckMask))
