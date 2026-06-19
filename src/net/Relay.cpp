@@ -390,10 +390,29 @@ bool RelayServer::DoHandshake(ClientConn& c)
 
     // Read header
     RelayMsgHeader hdr;
-    if (!RecvExact(c.Sock, (u8*)&hdr, sizeof(hdr)))         return false;
-    if (hdr.Magic  != kRelayMagic)                           return false;
-    if (hdr.Type   != (u32)RMsg_Hello)                       return false;
-    if (hdr.Length != sizeof(RelayHelloPayload))              return false;
+    if (!RecvExact(c.Sock, (u8*)&hdr, sizeof(hdr)))
+    {
+        Log(LogLevel::Error, "Relay: handshake failed at header recv\n");
+        return false;
+    }
+    Log(LogLevel::Info, "Relay: got header magic=%08X type=%u len=%u (expected magic=%08X type=%u len=%zu)\n",
+        hdr.Magic, hdr.Type, hdr.Length, kRelayMagic, (u32)RMsg_Hello, sizeof(RelayHelloPayload));
+
+    if (hdr.Magic  != kRelayMagic)
+    {
+        Log(LogLevel::Error, "Relay: bad magic\n");
+        return false;
+    }
+    if (hdr.Type   != (u32)RMsg_Hello)
+    {
+        Log(LogLevel::Error, "Relay: bad type\n");
+        return false;
+    }
+    if (hdr.Length != sizeof(RelayHelloPayload))
+    {
+        Log(LogLevel::Error, "Relay: bad length\n");
+        return false;
+    }
 
     // Read payload
     RelayHelloPayload hello;
@@ -408,6 +427,11 @@ bool RelayServer::DoHandshake(ClientConn& c)
     }
 
     // Validate room code
+    char recvCodeStr[7] = {0};
+    memcpy(recvCodeStr, hello.Code, 6);
+    Log(LogLevel::Info, "Relay: comparing received code '%s' against server code '%s'\n",
+        recvCodeStr, RoomCode);
+
     if (memcmp(hello.Code, RoomCode, 6) != 0)
     {
         auto msg = BuildMsg(RMsg_HelloNak);
