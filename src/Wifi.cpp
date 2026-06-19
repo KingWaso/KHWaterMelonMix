@@ -24,9 +24,12 @@
 #include "WifiAP.h"
 #include "Platform.h"
 
-// KHWaterMelonMix: set true by Relay.cpp when relay mode is active
-// so W_CmdReplyTime gets boosted to compensate for TCP routing latency.
-namespace melonDS { bool RelayModeActive = false; }
+    // KHWaterMelonMix: relay mode flag — defined in Relay.cpp.
+    // Declared extern in Relay.h; referenced here to boost
+    // W_CmdReplyTime and skip channel checks for relay frames.
+    // We forward-declare rather than include Relay.h to avoid
+    // cross-directory include issues.
+    namespace melonDS { extern bool RelayModeActive; }
 
 namespace melonDS
 {
@@ -672,11 +675,6 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
             if (aid == 0 && IsMPClient) aid = 1;
             Platform::MP_SendReply(TXBuffer, 12+len, USTimestamp, aid, NDS.UserData);
         }
-        break;
-
-    case 4:
-        *(u64*)&TXBuffer[0xC + 24] = USCounter;
-        Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
         break;
     }
 }
@@ -1495,26 +1493,23 @@ void Wifi::FinishRX()
         SetIRQ(0);
     }
 
-    if ((rxflags & 0x800F) == 0x800C)
+       if ((rxflags & 0x800F) == 0x800C)
     {
-        // reply to CMD frames
-
         u16 clientmask = *(u16*)&RXBuffer[0xC + 26];
         u16 myAID = IOPORT(W_AIDLow);
-
+ 
         // KHWaterMelonMix: if AIDLow is 0 but we are an MP client,
         // the host assigned us AID 1 by default (single-client session).
         // Use AID 1 so we send a real reply instead of a blank.
         if (myAID == 0 && IsMPClient)
             myAID = 1;
-
+ 
         if (myAID && (clientmask & (1 << myAID)))
         {
             SendMPReply(*(u16*)&RXBuffer[0xC + 24], clientmask);
         }
         else
         {
-            // send a blank — not in this client mask
             Platform::MP_SendReply(nullptr, 0, USTimestamp, 0, NDS.UserData);
         }
     }
@@ -1625,7 +1620,7 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
             continue;
         }
 
-        chan = RXBuffer[9];
+            chan = RXBuffer[9];
         // KHWaterMelonMix: skip channel check for relay MP host frames
         // (type 2). CurChannel may be 0 on the client if RF registers
         // haven't been programmed yet, but the relay already validates
@@ -1804,21 +1799,20 @@ void Wifi::USTimer(u32 param)
             StartRX();
         }
 
-      if (IsMPClient && NextSync != 0)
+      // KHWaterMelonMix: poll for host CMD/ACK frames via relay.
+        // Rate-limited to every 128 ticks (~1ms) to avoid the 2083
+        // calls/frame problem. Only polls once USTimestamp >= NextSync.
+        // No unsigned wraparound: we check >= before subtracting.
+        if (IsMPClient && NextSync != 0 && USTimestamp >= NextSync)
         {
-            if (USTimestamp >= NextSync)
-            {
-                // We've reached or passed NextSync — poll for host frames
-                // every 128 ticks (1ms) until a new frame updates NextSync.
-                if (!(USTimestamp & 0x7F & kTimeCheckMask))
-                    CheckRX(2);
-
-                // KHWaterMelonMix: if we've gone more than 50ms past
-                // NextSync without receiving anything, nudge NextSync
-                // forward to prevent stale polling.
-                if ((USTimestamp - NextSync) > 50000ULL)
-                    NextSync = USTimestamp;
-            }
+            if (!(USTimestamp & 0x7F & kTimeCheckMask))
+                CheckRX(2);
+ 
+            // If we've been polling for >50ms with no new CMD frame,
+            // advance NextSync so we don't fall permanently behind.
+            if ((USTimestamp - NextSync) > 50000ULL)
+                NextSync = USTimestamp;
+        }
             // if USTimestamp < NextSync, just wait — don't poll yet
         }
     }
