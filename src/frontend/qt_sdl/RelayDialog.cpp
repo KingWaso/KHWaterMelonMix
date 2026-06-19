@@ -272,7 +272,7 @@ void RelaySessionDialog::doUpdatePlayerList()
 {
     if (MPInterface::GetType() != MPInterface_Relay) return;
 
-    auto players   = relay().GetPlayerList();
+    auto players   = relay().GetPeerList();
     int  maxplayers = relay().GetMaxPlayers();
 
     QStandardItemModel* model = (QStandardItemModel*)ui->tvPlayerList->model();
