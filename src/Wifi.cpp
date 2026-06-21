@@ -668,11 +668,13 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
     }
     TXBuffer[9] = CurChannel;
 
-    switch (num)
+   switch (num)
     {
     case 0:
     case 2:
     case 3:
+        Log(LogLevel::Info, "KHMM: TXSendFrame case=%d len=%d chan=%d IsMP=%d\n",
+            num, len, CurChannel, IsMP);
         Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
         if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
         break;
@@ -1111,16 +1113,14 @@ bool Wifi::ProcessTX(TXSlot* slot, int num)
             }
 
             IOPORT(W_TXBusy) &= ~(1<<num);
-
             switch (num)
             {
             case 0:
             case 2:
             case 3:
-                Log(LogLevel::Info, "KHMM: TXSendFrame case=%d len=%d chan=%d IsMP=%d\n",
-                    num, len, CurChannel, IsMP);
-                Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
-                if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
+                IOPORT(W_TXStat) = 0x0001 | ((num?(num-1):0)<<12);
+                SetIRQ(1);
+                IOPORT(W_TXSlotLoc1 + ((num?(num-1):0)*4)) &= 0x7FFF;
                 break;
 
             case 4: // beacon
