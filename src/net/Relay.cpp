@@ -736,6 +736,8 @@ int RelayServer::DequeueRX(std::queue<RelayRXEntry>& q,
 
 int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
 {
+    Log(LogLevel::Info, "KHMM: RelayServer::SendPacket len=%d numClients=%d\n",
+        len, (int)Clients.size());
     // Type 0 = general frame (beacons, assoc, etc.)
     MPPacketHeader mph = {0x4946494E, 0, 0, (u32)len, timestamp};
     std::vector<u8> msg(sizeof(RelayMsgHeader) + sizeof(mph) + len);
@@ -1066,6 +1068,8 @@ void RelayClient::RecvLoop()
             if (plen < sizeof(MPPacketHeader)) break;
             MPPacketHeader* mph = (MPPacketHeader*)payload.data();
             u32 mptype = mph->Type & 0xFFFF;
+            Log(LogLevel::Info, "KHMM: client RecvLoop got MPPacket type=%u len=%u\n",
+                mptype, plen);
 
             RelayRXEntry entry;
             entry.Data.assign(payload.begin() + sizeof(MPPacketHeader),
