@@ -1117,9 +1117,10 @@ bool Wifi::ProcessTX(TXSlot* slot, int num)
             case 0:
             case 2:
             case 3:
-                IOPORT(W_TXStat) = 0x0001 | ((num?(num-1):0)<<12);
-                SetIRQ(1);
-                IOPORT(W_TXSlotLoc1 + ((num?(num-1):0)*4)) &= 0x7FFF;
+                Log(LogLevel::Info, "KHMM: TXSendFrame case=%d len=%d chan=%d IsMP=%d\n",
+                    num, len, CurChannel, IsMP);
+                Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
+                if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
                 break;
 
             case 4: // beacon
