@@ -1913,9 +1913,11 @@ void Wifi::USTimer(u32 param)
             // Only skip if we are a confirmed MP client AND haven't reached NextSync yet.
             if ((!IsMPClient) || (USTimestamp > NextSync) || (NextSync == 0))
             {
-                if ((!(RXCounter & 0x1FF & kTimeCheckMask)) && (!ComStatus))
+               if ((!(RXCounter & 0x1FF & kTimeCheckMask)) && (!ComStatus))
                 {
-                    CheckRX(0);
+                    bool got = CheckRX(0);
+                    if (got)
+                        Log(LogLevel::Info, "KHMM: CheckRX(0) got a frame!\n");
                 }
             }
 
