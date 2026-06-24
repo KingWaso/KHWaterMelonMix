@@ -1638,18 +1638,25 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
         }
 
             chan = RXBuffer[9];
-        // KHWaterMelonMix: skip channel check for relay MP host frames
-        // (type 2). CurChannel may be 0 on the client if RF registers
-        // haven't been programmed yet, but the relay already validates
-        // routing so the channel check is redundant and kills all frames.
-        bool skipChannelCheck = (type == 2);
+        // KHWaterMelonMix: skip the strict channel check for ALL relay
+        // traffic (type 0 general/beacon frames AND type 2 host frames).
+        // Real DS hardware scans channels 1/6/11/13 etc. looking for an
+        // AP; our relay packets arrive on whatever channel the SENDER
+        // had at TX time, which won't always match the local receiver's
+        // current scan position. Since the relay already guarantees the
+        // packet came from a legitimate session peer, channel matching
+        // is redundant here and was silently dropping every beacon/CMD
+        // frame whenever CurChannel didn't happen to line up.
+        bool skipChannelCheck = RelayModeActive;
         if (!skipChannelCheck && (chan != CurChannel || CurChannel == 0))
         {
             Log(LogLevel::Debug, "received frame but bad channel %d (expected %d)\n", chan, CurChannel);
             continue;
         }
-        // For type 2, adopt the host's channel if ours is unset
-        if (type == 2 && CurChannel == 0 && chan != 0)
+        // KHWaterMelonMix: when bypassing the channel check, adopt the
+        // sender's channel so subsequent state (TX echoes, etc.) stays
+        // consistent, but only if ours is still unset.
+        if (RelayModeActive && CurChannel == 0 && chan != 0)
             CurChannel = chan;
 
         // hack: ignore MP frames if not engaged in a MP comm
