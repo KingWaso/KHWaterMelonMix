@@ -1623,14 +1623,17 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
             rxlen = Platform::MP_RecvPacket(RXBuffer, &timestamp, NDS.UserData);
             if (rxlen > 0 && RelayModeActive)
             {
-                // KHWaterMelonMix: pipe relay-received frames through WifiAP
-                // so it can handle auth/assoc requests from relay clients.
-                // On real hardware WifiAP would see these over the air;
-                // over relay they arrive via MP_RecvPacket instead.
-                // WifiAP->SendPacket() processes the frame and queues a
-                // response (auth response, assoc response) into WifiAP's
-                // RX buffer, which the client will receive on next poll.
-                WifiAP->SendPacket(RXBuffer, rxlen);
+                // KHWaterMelonMix: pipe auth/assoc request frames through
+                // WifiAP so it generates auth/assoc responses for relay
+                // clients. Only do this for management frames (type 0x00)
+                // that are auth (0xB0) or assoc (0x00) subtypes — NOT
+                // beacons or other frames, to avoid WifiAP sending spurious
+                // deauths in response to echoed host frames.
+                u16 fc = rxlen >= 14 ? *(u16*)&RXBuffer[12] : 0;
+                u8 ftype = (fc >> 2) & 0x3;   // 0=management
+                u8 fsub  = (fc >> 4) & 0xF;   // 0xB=auth, 0x0=assoc, 0xA=deassoc, 0xC=deauth
+                if (ftype == 0 && (fsub == 0xB || fsub == 0x0))
+                    WifiAP->SendPacket(RXBuffer, rxlen);
             }
             if ((rxlen <= 0) && (!IsMP))
                 rxlen = WifiAP->RecvPacket(RXBuffer);
