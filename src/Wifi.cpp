@@ -742,6 +742,9 @@ void Wifi::StartTX_Cmd()
 
     MPClientMask = *(u16*)&RAM[slot->Addr + 12 + 24 + 2] & MPClientFail;
     MPClientFail &= MPClientMask;
+    Log(LogLevel::Info, "KHMM: StartTX_Cmd MPClientMask=%04X MPClientFail=%04X rawmask=%04X\n",
+        MPClientMask, MPClientFail,
+        *(u16*)&RAM[slot->Addr + 12 + 24 + 2]);
 
     u32 duration = PreambleLen(slot->Rate) + (slot->Length * (slot->Rate==2 ? 4:8));
     duration += 112 + ((10 + IOPORT(W_CmdReplyTime)) * NumClients(MPClientMask));
