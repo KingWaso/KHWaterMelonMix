@@ -1105,6 +1105,8 @@ bool Wifi::ProcessTX(TXSlot* slot, int num)
                 u16 res = 0;
                 if (MPClientMask)
                     res = Platform::MP_RecvReplies(MPClientReplies, USTimestamp, MPClientMask, NDS.UserData);
+                Log(LogLevel::Info, "KHMM: RecvReplies returned res=%04X MPClientFail before=%04X after=%04X\n",
+                    res, MPClientFail, MPClientFail & ~res);
                 MPClientFail &= ~res;
 
                 // TODO: 112 likely includes the ack preamble, which needs adjusted
