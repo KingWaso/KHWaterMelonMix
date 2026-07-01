@@ -758,6 +758,8 @@ void Wifi::StartTX_Cmd()
 void Wifi::StartTX_Beacon()
 {
     TXSlot* slot = &TXSlots[4];
+    Log(LogLevel::Info, "KHMM: StartTX_Beacon called addr=%04X\n",
+        (IOPORT(W_TXSlotBeacon) & 0x0FFF) << 1);
 
     slot->Valid = true;
 
@@ -2502,6 +2504,8 @@ void Wifi::Write(u32 addr, u16 val)
 
     case W_TXSlotBeacon:
         IsMP = (val & 0x8000) != 0;
+        Log(LogLevel::Info, "KHMM: W_TXSlotBeacon write val=%04X IsMP=%d\n",
+            val, IsMP);
         break;
 
     case W_TXSlotCmd:
