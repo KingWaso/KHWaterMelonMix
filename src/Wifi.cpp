@@ -2518,6 +2518,8 @@ void Wifi::Write(u32 addr, u16 val)
     case W_TXSlotCmd:
         if (CmdCounter == 0)
             val = (val & 0x7FFF) | (IOPORT(W_TXSlotCmd) & 0x8000);
+        Log(LogLevel::Info, "KHMM: W_TXSlotCmd write val=%04X CmdCounter=%d\n",
+            val, CmdCounter);
         // fall-through
     case W_TXSlotLoc1:
     case W_TXSlotLoc2:
