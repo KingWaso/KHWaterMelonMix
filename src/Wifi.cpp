@@ -1618,9 +1618,20 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
     {
         timestamp = 0;
 
-        if (type == 0)
+       if (type == 0)
         {
             rxlen = Platform::MP_RecvPacket(RXBuffer, &timestamp, NDS.UserData);
+            if (rxlen > 0 && RelayModeActive)
+            {
+                // KHWaterMelonMix: pipe relay-received frames through WifiAP
+                // so it can handle auth/assoc requests from relay clients.
+                // On real hardware WifiAP would see these over the air;
+                // over relay they arrive via MP_RecvPacket instead.
+                // WifiAP->SendPacket() processes the frame and queues a
+                // response (auth response, assoc response) into WifiAP's
+                // RX buffer, which the client will receive on next poll.
+                WifiAP->SendPacket(RXBuffer, rxlen);
+            }
             if ((rxlen <= 0) && (!IsMP))
                 rxlen = WifiAP->RecvPacket(RXBuffer);
         }
