@@ -834,6 +834,11 @@ u16 RelayServer::RecvReplies(int inst, u8* packets,
     }
 
     u16 ret = 0;
+    {
+        std::lock_guard<std::mutex> lk(RXMutex);
+        Log(LogLevel::Info, "KHMM: RecvReplies aidmask=%04X queueSize=%d\n",
+            aidmask, (int)RXHostQueue.size());
+    }
     std::lock_guard<std::mutex> lk(RXMutex);
     while (!RXHostQueue.empty())
     {
