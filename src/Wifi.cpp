@@ -1111,11 +1111,6 @@ bool Wifi::ProcessTX(TXSlot* slot, int num)
 
                 slot->CurPhase = 2;
                 slot->CurPhaseTime = 112 + ((10 + IOPORT(W_CmdReplyTime)) * NumClients(MPClientMask));
-                // KHWaterMelonMix: relay adds real network latency on top of
-                // the emulated reply window. Give extra time so replies that
-                // arrive slightly late still get counted.
-                if (RelayModeActive)
-                    slot->CurPhaseTime += 50000; // ~50ms extra in µs ticks
 
                 break;
             }
