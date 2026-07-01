@@ -678,12 +678,19 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
         Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
         if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
         break;
-
+    case 4: // beacon
+        // KHWaterMelonMix: send beacon through relay so clients can
+        // discover the host's game room. On real hardware this goes
+        // over the air; over the relay we route it via SendPacket
+        // (type 0) so all connected peers receive it.
+        Log(LogLevel::Info, "KHMM: TXSendFrame beacon len=%d chan=%d\n",
+            len, CurChannel);
+        Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
+        break;
     case 1:
         *(u16*)&TXBuffer[12 + 24+2] = MPClientMask;
         Platform::MP_SendCmd(TXBuffer, 12+len, USTimestamp, NDS.UserData);
         break;
-
     case 5:
         IncrementTXCount(slot);
         {
