@@ -159,9 +159,11 @@ RelayServer::RelayServer()
     , MaxPlayers(4)
     , HostChannel(0)
     , Running(false)
+    , CachedReplyMask(0)
 {
     memset(RoomCode, 0, sizeof(RoomCode));
     memset(HostName, 0, sizeof(HostName));
+    memset(CachedReplies, 0, sizeof(CachedReplies));
 }
 
 RelayServer::~RelayServer()
@@ -616,7 +618,16 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
 
         if (mptype == 2)
         {
-            // Type 2 = client reply → host's reply queue (time-critical)
+            // KHWaterMelonMix: pre-cache reply for instant RecvReplies access.
+            // AcceptThread writes here; RecvReplies reads without waiting.
+            u16 aid = (u16)(mph.SenderID > 0 ? mph.SenderID : entry.Aid);
+            if (aid > 0 && aid < 16)
+            {
+                int sz = (int)frameDataLen;
+                if (sz > 1024) sz = 1024;
+                memcpy(CachedReplies[aid], frameData, sz);
+                CachedReplyMask |= (1 << aid);
+            }
             RXHostQueue.push(std::move(entry));
         }
         else
@@ -815,49 +826,23 @@ int RelayServer::RecvHostPacket(int inst, u8* data, u64* timestamp)
 u16 RelayServer::RecvReplies(int inst, u8* packets,
                               u64 timestamp, u16 aidmask)
 {
-    // Called once per CMD cycle from ProcessTX phase-1 (NOT per timer tick).
-    // Wait up to one CMD reply window for client replies to arrive.
-    // CMD reply window = (10 + W_CmdReplyTime) * 8µs per client.
-    // With our boosted W_CmdReplyTime=200, that's ~1.68ms per client.
-    // We wait up to 12ms to cover 1-2 clients with network jitter.
-
-    const u64 kReplyWaitUS = 12000; // 12ms
-    u64 deadline = NowUS() + kReplyWaitUS;
-
-    while (NowUS() < deadline)
-    {
-        {
-            std::lock_guard<std::mutex> lk(RXMutex);
-            if (!RXHostQueue.empty()) break;
-        }
-        std::this_thread::sleep_for(std::chrono::microseconds(200));
-    }
-
-    u16 ret = 0;
-    {
-        std::lock_guard<std::mutex> lk(RXMutex);
-        Log(LogLevel::Info, "KHMM: RecvReplies aidmask=%04X queueSize=%d\n",
-            aidmask, (int)RXHostQueue.size());
-    }
+    // KHWaterMelonMix: non-blocking — AcceptThread pre-caches replies
+    // as they arrive in DispatchMPPacket. We just read the cache and
+    // clear it. No waiting, no blocking the Wifi timer thread.
     std::lock_guard<std::mutex> lk(RXMutex);
-    while (!RXHostQueue.empty())
+    u16 ret = CachedReplyMask & aidmask;
+    if (ret)
     {
-        RelayRXEntry& e = RXHostQueue.front();
-        Log(LogLevel::Info, "KHMM: RecvReplies draining Type=%08X Aid=%d aidmask=%04X\n",
-            e.Type, e.Aid, aidmask);
-        if ((e.Type & 0xFFFF) == 2)
+        for (int i = 1; i < 16; i++)
         {
-            u16 aid = e.Aid;
-            if (aid > 0 && aid < 16 && (aidmask & (1 << aid)))
-            {
-                int sz = (int)e.Data.size();
-                if (sz > 1024) sz = 1024;
-                memcpy(&packets[(aid - 1) * 1024], e.Data.data(), sz);
-                ret |= (1 << aid);
-            }
+            if (ret & (1 << i))
+                memcpy(&packets[(i-1)*1024], CachedReplies[i], 1024);
         }
-        RXHostQueue.pop();
+        CachedReplyMask &= ~aidmask;
     }
+    // Also drain RXHostQueue to keep it from growing
+    while (!RXHostQueue.empty())
+        RXHostQueue.pop();
     return ret;
 }
 
