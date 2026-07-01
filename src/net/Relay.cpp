@@ -843,6 +843,8 @@ u16 RelayServer::RecvReplies(int inst, u8* packets,
     while (!RXHostQueue.empty())
     {
         RelayRXEntry& e = RXHostQueue.front();
+        Log(LogLevel::Info, "KHMM: RecvReplies draining Type=%08X Aid=%d aidmask=%04X\n",
+            e.Type, e.Aid, aidmask);
         if ((e.Type & 0xFFFF) == 2)
         {
             u16 aid = e.Aid;
