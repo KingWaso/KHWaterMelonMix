@@ -833,6 +833,8 @@ void Wifi::FireTX()
 
 void Wifi::SendMPDefaultReply()
 {
+    Log(LogLevel::Info, "KHMM: SendMPDefaultReply AIDLow=%04X IsMPClient=%d\n",
+        IOPORT(W_AIDLow), IsMPClient);
     u8 reply[12 + 28];
 
     *(u16*)&reply[0xA] = 28; // length
@@ -870,6 +872,8 @@ void Wifi::SendMPDefaultReply()
 void Wifi::SendMPReply(u16 clienttime, u16 clientmask)
 {
     TXSlot* slot = &TXSlots[5];
+    Log(LogLevel::Info, "KHMM: SendMPReply clienttime=%d clientmask=%04X AIDLow=%04X\n",
+        clienttime, clientmask, IOPORT(W_AIDLow));
 
     // mark the last packet as success. dunno what the MSB is, it changes.
     //if (slot->Valid)
