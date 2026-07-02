@@ -160,6 +160,7 @@ RelayServer::RelayServer()
     , HostChannel(0)
     , Running(false)
     , CachedReplyMask(0)
+    , LastBeaconStateWasOpen(true)
 {
     memset(RoomCode, 0, sizeof(RoomCode));
     memset(HostName, 0, sizeof(HostName));
