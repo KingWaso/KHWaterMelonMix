@@ -826,9 +826,20 @@ int RelayServer::RecvHostPacket(int inst, u8* data, u64* timestamp)
 u16 RelayServer::RecvReplies(int inst, u8* packets,
                               u64 timestamp, u16 aidmask)
 {
-    // KHWaterMelonMix: non-blocking — AcceptThread pre-caches replies
-    // as they arrive in DispatchMPPacket. We just read the cache and
-    // clear it. No waiting, no blocking the Wifi timer thread.
+    // KHWaterMelonMix: wait up to 15ms for replies, but in short
+    // 200µs sleeps so we're not holding the mutex the whole time.
+    // AcceptThread can write to cache between sleeps.
+    const u64 kReplyWaitUS = 15000;
+    u64 deadline = NowUS() + kReplyWaitUS;
+    while (NowUS() < deadline)
+    {
+        {
+            std::lock_guard<std::mutex> lk(RXMutex);
+            if (CachedReplyMask & aidmask) break;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+
     std::lock_guard<std::mutex> lk(RXMutex);
     u16 ret = CachedReplyMask & aidmask;
     if (ret)
@@ -840,7 +851,6 @@ u16 RelayServer::RecvReplies(int inst, u8* packets,
         }
         CachedReplyMask &= ~aidmask;
     }
-    // Also drain RXHostQueue to keep it from growing
     while (!RXHostQueue.empty())
         RXHostQueue.pop();
     return ret;
