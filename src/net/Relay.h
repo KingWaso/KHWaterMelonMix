@@ -177,6 +177,7 @@ private:
     // RecvReplies reads and clears it instantly — no waiting.
     u8   CachedReplies[16][1024];  // indexed by AID 1..15
     u16  CachedReplyMask;          // bitmask of AIDs with valid data
+    bool LastBeaconStateWasOpen;  // KHWaterMelonMix: transition beacon tracker
 
     void AcceptLoop();
     bool DoHandshake(ClientConn& c);
