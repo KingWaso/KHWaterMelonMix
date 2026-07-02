@@ -750,18 +750,35 @@ int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
     Log(LogLevel::Info, "KHMM: RelayServer::SendPacket len=%d numClients=%d\n",
         len, (int)Clients.size());
 
-    // KHWaterMelonMix: suppress the KH358 lobby→character-select
-    // transition beacon (state=0x00, channel=7, cmd_data_size=0x0C2A).
-    // Distinguishable from the char-select beacon (channel=13,
-    // cmd_data_size=0x372C) which must NOT be suppressed.
-    if (len >= 84
-        && data[83] == 0x00   // state = PROCEED
-        && data[9]  == 0x07   // channel 7 = lobby channel
-        && data[80] == 0x0C   // cmd_data_size low = lobby value
-        && data[81] == 0x2A)  // cmd_data_size high = lobby value
+   // KHWaterMelonMix: suppress KH358 state-transition beacons.
+    // Find the Nintendo IE (Tag=0xDD) and check state byte at IE+21.
+    // Lobby beacons have state=0x01; transition beacons have state=0x00.
+    // We suppress state=0x00 only when cmd_data_size matches the lobby
+    // value, to avoid suppressing char-select or mission beacons.
+    if (len >= 90)
     {
-        Log(LogLevel::Info, "KHMM: Suppressing lobby transition beacon\n");
-        return len;
+        // Find DD tag by scanning from byte 36 (after 802.11 fixed fields)
+        for (int i = 36; i < len - 25; i++)
+        {
+            if (data[i] == 0xDD && data[i+1] == 0x30
+                && data[i+2] == 0x00 && data[i+3] == 0x09
+                && data[i+4] == 0xBF)
+            {
+                // Found Nintendo IE at offset i
+                // State byte is at IE payload offset 18 = i+2+3+16 = i+21
+                u8 state        = data[i + 21];
+                u8 cmdsize_lo   = data[i + 18];
+                u8 cmdsize_hi   = data[i + 19];
+                if (state == 0x00 && cmdsize_lo == 0x0C && cmdsize_hi == 0x2A)
+                {
+                    Log(LogLevel::Info,
+                        "KHMM: Suppressing lobby transition beacon "
+                        "(IE at %d state=0x00 cmdsize=0x0C2A)\n", i);
+                    return len;
+                }
+                break;
+            }
+        }
     }
 
     // Type 0 = general frame (beacons, assoc, etc.)
