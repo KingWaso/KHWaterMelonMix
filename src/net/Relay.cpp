@@ -751,10 +751,16 @@ int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
         len, (int)Clients.size());
 
     // KHWaterMelonMix: suppress the KH358 lobby→character-select
-    // transition beacon (state byte at frame[83] == 0x00).
-    if (len >= 84 && data[83] == 0x00 && data[60] == 0xDD)
+    // transition beacon (state=0x00, channel=7, cmd_data_size=0x0C2A).
+    // Distinguishable from the char-select beacon (channel=13,
+    // cmd_data_size=0x372C) which must NOT be suppressed.
+    if (len >= 84
+        && data[83] == 0x00   // state = PROCEED
+        && data[9]  == 0x07   // channel 7 = lobby channel
+        && data[80] == 0x0C   // cmd_data_size low = lobby value
+        && data[81] == 0x2A)  // cmd_data_size high = lobby value
     {
-        Log(LogLevel::Info, "KHMM: Suppressing transition beacon (state=0x00)\n");
+        Log(LogLevel::Info, "KHMM: Suppressing lobby transition beacon\n");
         return len;
     }
 
