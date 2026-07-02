@@ -679,13 +679,18 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
         if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
         break;
     case 4: // beacon
-        // KHWaterMelonMix: send beacon through relay so clients can
-        // discover the host's game room. On real hardware this goes
-        // over the air; over the relay we route it via SendPacket
-        // (type 0) so all connected peers receive it.
-        Log(LogLevel::Info, "KHMM: TXSendFrame beacon len=%d chan=%d\n",
-            len, CurChannel);
-        Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
+        {
+            // KHWaterMelonMix: dump beacon frame bytes to identify
+            // the transition beacon content
+            char hexbuf[256] = {};
+            int dumplen = std::min(len + 12, 64);
+            for (int i = 0; i < dumplen; i++)
+                snprintf(hexbuf + i*3, sizeof(hexbuf) - i*3,
+                         "%02X ", TXBuffer[i]);
+            Log(LogLevel::Info, "KHMM: TXSendFrame beacon len=%d chan=%d bytes=%s\n",
+                len, CurChannel, hexbuf);
+            Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
+        }
         break;
     case 1:
         *(u16*)&TXBuffer[12 + 24+2] = MPClientMask;
