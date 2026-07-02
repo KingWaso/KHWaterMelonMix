@@ -749,6 +749,15 @@ int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
 {
     Log(LogLevel::Info, "KHMM: RelayServer::SendPacket len=%d numClients=%d\n",
         len, (int)Clients.size());
+
+    // KHWaterMelonMix: suppress the KH358 lobby→character-select
+    // transition beacon (state byte at frame[83] == 0x00).
+    if (len >= 84 && data[83] == 0x00 && data[60] == 0xDD)
+    {
+        Log(LogLevel::Info, "KHMM: Suppressing transition beacon (state=0x00)\n");
+        return len;
+    }
+
     // Type 0 = general frame (beacons, assoc, etc.)
     MPPacketHeader mph = {0x4946494E, 0, 0, (u32)len, timestamp};
     std::vector<u8> msg(sizeof(RelayMsgHeader) + sizeof(mph) + len);
@@ -759,7 +768,7 @@ int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
     if (len) memcpy(msg.data() + sizeof(hdr) + sizeof(mph), data, len);
 
     std::lock_guard<std::mutex> lk(ClientsMutex);
-    BroadcastRaw(msg.data(), (int)msg.size(), 0 /*exclude host AID*/);
+    BroadcastRaw(msg.data(), (int)msg.size(), 0);
     return len;
 }
 
