@@ -163,8 +163,6 @@ private:
 
     std::atomic<bool>     Running;
     std::thread           AcceptThread;
-    std::thread           ReplyThread;    // pre-fetches replies into cache
-    std::condition_variable ReplyCond;   // signalled when new reply arrives
 
     std::mutex            ClientsMutex;
     std::vector<ClientConn> Clients;
