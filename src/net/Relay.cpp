@@ -750,34 +750,25 @@ int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
     Log(LogLevel::Info, "KHMM: RelayServer::SendPacket len=%d numClients=%d\n",
         len, (int)Clients.size());
 
-   // KHWaterMelonMix: suppress KH358 state-transition beacons.
-    // Find the Nintendo IE (Tag=0xDD) and check state byte at IE+21.
-    // Lobby beacons have state=0x01; transition beacons have state=0x00.
-    // We suppress state=0x00 only when cmd_data_size matches the lobby
-    // value, to avoid suppressing char-select or mission beacons.
-    if (len >= 90)
+  // KHWaterMelonMix: suppress the single lobby→charsel transition
+    // beacon (first state=0x00 after a run of state=0x01 beacons).
+    if (len >= 84)
     {
-        // Find DD tag by scanning from byte 36 (after 802.11 fixed fields)
-        for (int i = 36; i < len - 25; i++)
+        // DD tag is at byte 62 in this build
+        int dd = 62;
+        if (dd + 22 < len && data[dd] == 0xDD
+            && data[dd+2] == 0x00 && data[dd+3] == 0x09
+            && data[dd+4] == 0xBF)
         {
-            if (data[i] == 0xDD && data[i+1] == 0x30
-                && data[i+2] == 0x00 && data[i+3] == 0x09
-                && data[i+4] == 0xBF)
+            u8 state = data[dd + 21];
+            if (state == 0x00 && LastBeaconStateWasOpen)
             {
-                // Found Nintendo IE at offset i
-                // State byte is at IE payload offset 18 = i+2+3+16 = i+21
-                u8 state        = data[i + 21];
-                u8 cmdsize_lo   = data[i + 18];
-                u8 cmdsize_hi   = data[i + 19];
-                if (state == 0x00 && cmdsize_lo == 0x0C && cmdsize_hi == 0x2A)
-                {
-                    Log(LogLevel::Info,
-                        "KHMM: Suppressing lobby transition beacon "
-                        "(IE at %d state=0x00 cmdsize=0x0C2A)\n", i);
-                    return len;
-                }
-                break;
+                Log(LogLevel::Info,
+                    "KHMM: Suppressing lobby transition beacon\n");
+                LastBeaconStateWasOpen = false;
+                return len;
             }
+            LastBeaconStateWasOpen = (state == 0x01);
         }
     }
 
