@@ -186,6 +186,7 @@ private:
     void BroadcastRaw(const u8* data, int len, int excludeAID = -1);
     bool SendRaw(socket_t s, const u8* data, int len);
     int  DequeueRX(std::queue<RelayRXEntry>& q, u8* data, u64* timestamp);
+    bool LastBeaconStateWasOpen = true; // true=0x01, false=0x00
 };
 
 // ─── RelayClient ─────────────────────────────────────────────────────────────
