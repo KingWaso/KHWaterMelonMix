@@ -1607,13 +1607,19 @@ void Wifi::MPClientReplyRX(int client)
     StartRX();
 }
 
-bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
+bool Wifi::CheckRX(int type)
 {
     if (IOPORT(W_PowerState) & (1<<9))
         return false;
 
     if (!(IOPORT(W_RXCnt) & 0x8000))
+    {
+        // KHWaterMelonMix: temporary - log when RXCnt blocks
+        if (type == 0 && RelayModeActive)
+            Log(LogLevel::Info, "KHMM: CheckRX(0) blocked by W_RXCnt=%04X\n",
+                IOPORT(W_RXCnt));
         return false;
+    }
 
     if (IOPORT(W_RXBufBegin) == IOPORT(W_RXBufEnd))
         return false;
