@@ -1111,6 +1111,9 @@ bool Wifi::ProcessTX(TXSlot* slot, int num)
 
                 slot->CurPhase = 2;
                 slot->CurPhaseTime = 112 + ((10 + IOPORT(W_CmdReplyTime)) * NumClients(MPClientMask));
+                // KHWaterMelonMix: small extra window for relay network jitter
+                if (RelayModeActive)
+                    slot->CurPhaseTime += 5000; // 5ms extra
 
                 break;
             }
