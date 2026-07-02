@@ -680,9 +680,6 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
         break;
     case 4: // beacon
         {
-            // KHWaterMelonMix: dump beacon frame bytes to identify
-            // the transition beacon content
-            char hexbuf[256] = {};
             // Dump full frame — increase buffer size too
             char hexbuf[512] = {};
             int dumplen = len + 12; // full frame
