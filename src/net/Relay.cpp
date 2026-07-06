@@ -161,6 +161,8 @@ RelayServer::RelayServer()
     , Running(false)
     , CachedReplyMask(0)
     , LastBeaconStateWasOpen(true)
+    , LastBeaconSentUS(0)
+    , InTransition(false)
 {
     memset(RoomCode, 0, sizeof(RoomCode));
     memset(HostName, 0, sizeof(HostName));
@@ -701,7 +703,30 @@ bool RelayServer::SendRaw(socket_t s, const u8* data, int len)
 // ── Process ────────────────────────────────────────────────────────────────
 void RelayServer::Process()
 {
-    // AcceptThread does all the work; nothing needed here.
+    // KHWaterMelonMix: replay last beacon during host transition
+    // so client keeps scanning and finds the host after JIT reset.
+    if (InTransition && !LastBeacon.empty())
+    {
+        u64 now = NowUS();
+        if (now - LastBeaconSentUS >= 200000ULL) // every 200ms
+        {
+            LastBeaconSentUS = now;
+            MPPacketHeader mph = {0x4946494E, 0, 0,
+                                  (u32)LastBeacon.size(), now};
+            std::vector<u8> msg(sizeof(RelayMsgHeader) + sizeof(mph)
+                                + LastBeacon.size());
+            RelayMsgHeader hdr = {kRelayMagic, (u32)RMsg_MPPacket,
+                                  (u32)(sizeof(mph) + LastBeacon.size())};
+            memcpy(msg.data(), &hdr, sizeof(hdr));
+            memcpy(msg.data() + sizeof(hdr), &mph, sizeof(mph));
+            memcpy(msg.data() + sizeof(hdr) + sizeof(mph),
+                   LastBeacon.data(), LastBeacon.size());
+
+            std::lock_guard<std::mutex> lk(ClientsMutex);
+            BroadcastRaw(msg.data(), (int)msg.size(), 0);
+            Log(LogLevel::Info, "KHMM: Replaying cached beacon during transition\n");
+        }
+    }
 }
 
 // ── GetPeerList / GetNumPlayers ────────────────────────────────────────────
@@ -751,25 +776,30 @@ int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
     Log(LogLevel::Info, "KHMM: RelayServer::SendPacket len=%d numClients=%d\n",
         len, (int)Clients.size());
 
-  // KHWaterMelonMix: suppress the single lobby→charsel transition
-    // beacon (first state=0x00 after a run of state=0x01 beacons).
+  // Cache last valid lobby beacon for replay during host reset
     if (len >= 84)
     {
-        // DD tag is at byte 62 in this build
         int dd = 62;
         if (dd + 22 < len && data[dd] == 0xDD
             && data[dd+2] == 0x00 && data[dd+3] == 0x09
             && data[dd+4] == 0xBF)
         {
             u8 state = data[dd + 21];
-            if (state == 0x00 && LastBeaconStateWasOpen)
+            if (state == 0x01)
             {
-                Log(LogLevel::Info,
-                    "KHMM: Suppressing lobby transition beacon\n");
-                LastBeaconStateWasOpen = false;
-                return len;
+                // Save this as the last known-good beacon
+                LastBeacon.assign(data, data + len);
+                InTransition = false;
+                LastBeaconStateWasOpen = true;
             }
-            LastBeaconStateWasOpen = (state == 0x01);
+            else if (state == 0x00 && LastBeaconStateWasOpen)
+            {
+                // Transition started — enter replay mode
+                InTransition = true;
+                LastBeaconStateWasOpen = false;
+                Log(LogLevel::Info, "KHMM: Transition detected, entering beacon replay mode\n");
+                return len; // suppress as before
+            }
         }
     }
 
