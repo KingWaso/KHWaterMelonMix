@@ -179,6 +179,12 @@ private:
     u16  CachedReplyMask;          // bitmask of AIDs with valid data
     bool LastBeaconStateWasOpen;  // KHWaterMelonMix: transition beacon tracker
 
+    // KHWaterMelonMix: beacon replay cache (PPSSPP FriendFinder style).
+    // AcceptThread replays LastBeacon every ~200ms during host reset.
+    std::vector<u8> LastBeacon;      // last valid state=0x01 beacon
+    u64             LastBeaconSentUS; // wall-clock time of last replay
+    bool            InTransition;    // true during host WIFI OFF/ON cycle
+
     void AcceptLoop();
     bool DoHandshake(ClientConn& c);
     void ServiceClient(ClientConn& c);
