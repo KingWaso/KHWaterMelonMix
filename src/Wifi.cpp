@@ -1773,8 +1773,14 @@ bool Wifi::CheckRX(int type)
         IsMP = false;
         IsMPClient = false;
         NextSync = 0;
-
         RXTimestamp = 0;
+        // KHWaterMelonMix: flush stale relay frames so client rescans
+        // cleanly for the host's character-select beacon.
+        if (RelayModeActive)
+        {
+            u8 tmp[2048]; u64 ts;
+            while (Platform::MP_RecvPacket(tmp, &ts, NDS.UserData) > 0) {}
+        }
         StartRX();
     }
     else if (macgood && IsMPClient)
