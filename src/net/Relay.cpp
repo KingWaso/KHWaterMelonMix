@@ -608,9 +608,9 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
     u32 mptype = mph.Type & 0xFFFF;
 
     // KHWaterMelonMix: during host transition, relay handles auth/assoc
-    if (InTransition && mptype == 0 && frameDataLen >= 26)
+if (InTransition && mptype == 0 && frameDataLen >= 38)
     {
-        u16 fc = *(u16*)frameData;
+        u16 fc = *(u16*)(frameData + 12);
         u8 ftype = (fc >> 2) & 0x3;
         u8 fsub  = (fc >> 4) & 0xF;
         if (ftype == 0 && (fsub == 0xB || fsub == 0x0))
@@ -619,7 +619,7 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
             {
                 u8 response[12 + 30] = {};
                 u8* bssid     = &LastBeacon[22];
-                u8* clientmac = (u8*)frameData + 10;
+                u8* clientmac = (u8*)frameData + 12 + 10;
 
                 if (fsub == 0xB)
                 {
