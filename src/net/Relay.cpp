@@ -597,6 +597,78 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
         return;
     }
 
+    MPPacketHeader mph;
+    memcpy(&mph, payload, sizeof(mph));
+    mph.SenderID = (u32)sender.Peer.AID;
+
+    const u8* frameData    = payload + sizeof(MPPacketHeader);
+    u32       frameDataLen = (len > sizeof(MPPacketHeader))
+                             ? (len - sizeof(MPPacketHeader)) : 0;
+
+    u32 mptype = mph.Type & 0xFFFF;
+
+    // KHWaterMelonMix: during host transition, the relay handles
+    // auth/assoc requests itself so the client can re-associate
+    // even while the host is mid-JIT-reset.
+    if (InTransition && mptype == 0 && frameDataLen >= 26)
+    {
+        u16 fc = *(u16*)frameData;
+        u8 ftype = (fc >> 2) & 0x3;
+        u8 fsub  = (fc >> 4) & 0xF;
+        if (ftype == 0 && (fsub == 0xB || fsub == 0x0))
+        {
+            if (LastBeacon.size() >= 28)
+            {
+                u8 response[12 + 30] = {};
+                u8* bssid      = &LastBeacon[22];
+                u8* clientmac  = (u8*)frameData + 10;
+
+                if (fsub == 0xB) // auth response
+                {
+                    *(u16*)&response[12+0]  = 0x00B0;
+                    *(u16*)&response[12+2]  = 0x0000;
+                    memcpy(&response[12+4],  clientmac, 6);
+                    memcpy(&response[12+10], bssid, 6);
+                    memcpy(&response[12+16], bssid, 6);
+                    *(u16*)&response[12+22] = 0;
+                    *(u16*)&response[12+24] = 0;
+                    *(u16*)&response[12+26] = 2;
+                    *(u16*)&response[12+28] = 0;
+                }
+                else // assoc response
+                {
+                    *(u16*)&response[12+0]  = 0x0010;
+                    *(u16*)&response[12+2]  = 0x0000;
+                    memcpy(&response[12+4],  clientmac, 6);
+                    memcpy(&response[12+10], bssid, 6);
+                    memcpy(&response[12+16], bssid, 6);
+                    *(u16*)&response[12+22] = 0;
+                    *(u16*)&response[12+24] = 0x0021;
+                    *(u16*)&response[12+26] = 0;
+                    *(u16*)&response[12+28] = 0xC001;
+                }
+                response[8] = 0x14;
+                response[9] = LastBeacon[9];
+                *(u16*)&response[10] = 30;
+
+                MPPacketHeader mph2 = {0x4946494E, 0, 0, 30, 0};
+                std::vector<u8> rsp(sizeof(RelayMsgHeader) + sizeof(mph2) + 12 + 30);
+                RelayMsgHeader rhdr = {kRelayMagic, (u32)RMsg_MPPacket,
+                                       (u32)(sizeof(mph2) + 12 + 30)};
+                memcpy(rsp.data(), &rhdr, sizeof(rhdr));
+                memcpy(rsp.data() + sizeof(rhdr), &mph2, sizeof(mph2));
+                memcpy(rsp.data() + sizeof(rhdr) + sizeof(mph2), response, 12+30);
+                SendExact(sender.Sock, rsp.data(), (int)rsp.size());
+
+                Log(LogLevel::Info, "KHMM: Relay handled %s during transition\n",
+                    fsub == 0xB ? "auth" : "assoc");
+            }
+        }
+    }
+
+    // ── Route to host's RX queues ──────────────────────────────────────
+    // ... rest of function unchanged
+
     // Stamp the sender's AID into the header (so host knows who replied)
     MPPacketHeader mph;
     memcpy(&mph, payload, sizeof(mph));
