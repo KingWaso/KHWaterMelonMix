@@ -607,9 +607,7 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
 
     u32 mptype = mph.Type & 0xFFFF;
 
-    // KHWaterMelonMix: during host transition, the relay handles
-    // auth/assoc requests itself so the client can re-associate
-    // even while the host is mid-JIT-reset.
+    // KHWaterMelonMix: during host transition, relay handles auth/assoc
     if (InTransition && mptype == 0 && frameDataLen >= 26)
     {
         u16 fc = *(u16*)frameData;
@@ -620,10 +618,10 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
             if (LastBeacon.size() >= 28)
             {
                 u8 response[12 + 30] = {};
-                u8* bssid      = &LastBeacon[22];
-                u8* clientmac  = (u8*)frameData + 10;
+                u8* bssid     = &LastBeacon[22];
+                u8* clientmac = (u8*)frameData + 10;
 
-                if (fsub == 0xB) // auth response
+                if (fsub == 0xB)
                 {
                     *(u16*)&response[12+0]  = 0x00B0;
                     *(u16*)&response[12+2]  = 0x0000;
@@ -635,7 +633,7 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
                     *(u16*)&response[12+26] = 2;
                     *(u16*)&response[12+28] = 0;
                 }
-                else // assoc response
+                else
                 {
                     *(u16*)&response[12+0]  = 0x0010;
                     *(u16*)&response[12+2]  = 0x0000;
@@ -665,21 +663,6 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
             }
         }
     }
-}
-
-    // ── Route to host's RX queues ──────────────────────────────────────
-    // ... rest of function unchanged
-
-    // Stamp the sender's AID into the header (so host knows who replied)
-    MPPacketHeader mph;
-    memcpy(&mph, payload, sizeof(mph));
-    mph.SenderID = (u32)sender.Peer.AID;
-
-    const u8* frameData    = payload + sizeof(MPPacketHeader);
-    u32       frameDataLen = (len > sizeof(MPPacketHeader))
-                             ? (len - sizeof(MPPacketHeader)) : 0;
-
-    u32 mptype = mph.Type & 0xFFFF;
 
     // ── Route to host's RX queues ─────────────────────────────────────────
     {
@@ -694,8 +677,6 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
 
         if (mptype == 2)
         {
-            // KHWaterMelonMix: pre-cache reply for instant RecvReplies access.
-            // AcceptThread writes here; RecvReplies reads without waiting.
             u16 aid = (u16)(mph.SenderID > 0 ? mph.SenderID : entry.Aid);
             if (aid > 0 && aid < 16)
             {
@@ -708,13 +689,11 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
         }
         else
         {
-            // Type 0/1/3 = general/CMD/ACK → host's general queue
             RXQueue.push(std::move(entry));
         }
     }
 
     // ── Broadcast to all other clients ────────────────────────────────────
-    // Rebuild the packet with the updated header (SenderID stamped)
     std::vector<u8> fwd(sizeof(RelayMsgHeader) + sizeof(MPPacketHeader) + frameDataLen);
     {
         RelayMsgHeader fwdhdr;
