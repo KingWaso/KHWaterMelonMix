@@ -617,15 +617,6 @@ void Wifi::ReportMPReplyErrors(u16 clientfail)
 
 void Wifi::TXSendFrame(const TXSlot* slot, int num)
 {
-    bool isDeauth = ((fc & 0x00FF) == 0x00C0);
-            if (RelayModeActive && isDeauth && (IsMPClient || RelayDeauthSuppressed))
-            {
-                Log(LogLevel::Info, "KHMM: Suppressing client deauth during transition\n");
-                RelayDeauthSuppressed = true;
-                break;
-            }
-            if (!isDeauth)
-                RelayDeauthSuppressed = false;
     u32 noseqno = 0;
 
     if (RAM[slot->Addr + 0x4])
@@ -688,14 +679,14 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
         {
             u16 fc = *(u16*)&TXBuffer[12];
             bool isDeauth = ((fc & 0x00FF) == 0x00C0);
-            // KHWaterMelonMix: suppress client deauth during relay
-            // transition so the host keeps the client in its session
-            // while both sides reset for the next game phase.
-            if (RelayModeActive && IsMPClient && isDeauth)
+            if (RelayModeActive && isDeauth && (IsMPClient || RelayDeauthSuppressed))
             {
                 Log(LogLevel::Info, "KHMM: Suppressing client deauth during transition\n");
+                RelayDeauthSuppressed = true;
                 break;
             }
+            if (!isDeauth)
+                RelayDeauthSuppressed = false;
             Log(LogLevel::Info, "KHMM: TXSendFrame case=%d len=%d chan=%d IsMP=%d\n",
                 num, len, CurChannel, IsMP);
             Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
