@@ -678,27 +678,10 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
         Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
         if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
         break;
-    case 4: // beacon
-        {
-            // KHWaterMelonMix: log first 5 and last beacon for DD offset check
-            static int beaconCount = 0;
-            beaconCount++;
-            if (beaconCount <= 3 || (len >= 84 && TXBuffer[62] != 0xDD))
-            {
-                char hexbuf[512] = {};
-                int dumplen = std::min(len + 12, 116);
-                for (int i = 0; i < dumplen && i*3+3 < (int)sizeof(hexbuf); i++)
-                    snprintf(hexbuf + i*3, sizeof(hexbuf) - i*3, "%02X ", TXBuffer[i]);
-                Log(LogLevel::Info, "KHMM: TXSendFrame beacon #%d len=%d bytes=%s\n",
-                    beaconCount, len, hexbuf);
-            }
-            else
-            {
-                Log(LogLevel::Info, "KHMM: TXSendFrame beacon #%d len=%d chan=%d\n",
-                    beaconCount, len, CurChannel);
-            }
-            Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
-        }
+   case 4: // beacon
+        Log(LogLevel::Info, "KHMM: TXSendFrame beacon len=%d chan=%d\n",
+            len, CurChannel);
+        Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
         break;
     case 1:
         *(u16*)&TXBuffer[12 + 24+2] = MPClientMask;
