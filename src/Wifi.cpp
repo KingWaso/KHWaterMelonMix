@@ -95,6 +95,7 @@ bool MACIsBroadcast(const u8* a)
     return (*(u32*)&a[0] == 0xFFFFFFFF) && (*(u16*)&a[4] == 0xFFFF);
 }
 
+bool RelayDeauthSuppressed = false;
 
 Wifi::Wifi(melonDS::NDS& nds) : NDS(nds)
 {
@@ -111,7 +112,7 @@ Wifi::~Wifi()
 }
 
 void Wifi::Reset()
-{
+{        
     memset(RAM, 0, 0x2000);
     memset(IO, 0, 0x1000);
 
@@ -250,6 +251,8 @@ CurChannel = 1;
     IsMPClient = false;
     NextSync = 0;
     RXTimestamp = 0;
+
+    RelayDeauthSuppressed = false;
 
     WifiAP->Reset();
 }
@@ -614,6 +617,15 @@ void Wifi::ReportMPReplyErrors(u16 clientfail)
 
 void Wifi::TXSendFrame(const TXSlot* slot, int num)
 {
+    bool isDeauth = ((fc & 0x00FF) == 0x00C0);
+            if (RelayModeActive && isDeauth && (IsMPClient || RelayDeauthSuppressed))
+            {
+                Log(LogLevel::Info, "KHMM: Suppressing client deauth during transition\n");
+                RelayDeauthSuppressed = true;
+                break;
+            }
+            if (!isDeauth)
+                RelayDeauthSuppressed = false;
     u32 noseqno = 0;
 
     if (RAM[slot->Addr + 0x4])
