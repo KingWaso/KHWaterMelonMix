@@ -780,11 +780,11 @@ int RelayServer::SendPacket(int inst, u8* data, int len, u64 timestamp)
     if (len >= 84)
     {
         int dd = 62;
-        if (dd + 22 < len && data[dd] == 0xDD
+        if (dd + 24 < len && data[dd] == 0xDD
             && data[dd+2] == 0x00 && data[dd+3] == 0x09
             && data[dd+4] == 0xBF)
         {
-            u8 state = data[dd + 21];
+            u8 state = data[dd + 23];
             if (state == 0x01)
             {
                 // Save this as the last known-good beacon
