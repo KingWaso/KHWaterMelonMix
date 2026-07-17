@@ -185,6 +185,8 @@ private:
     static const int kTimerInterval = 8;
     static const u32 kTimeCheckMask = ~(kTimerInterval - 1);
 
+    bool RelayDeauthSuppressed;
+
     bool Enabled;
     bool PowerOn;
 
