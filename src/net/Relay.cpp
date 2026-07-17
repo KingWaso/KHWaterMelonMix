@@ -665,6 +665,7 @@ void RelayServer::DispatchMPPacket(ClientConn& sender,
             }
         }
     }
+}
 
     // ── Route to host's RX queues ──────────────────────────────────────
     // ... rest of function unchanged
