@@ -673,10 +673,22 @@ void Wifi::TXSendFrame(const TXSlot* slot, int num)
     case 0:
     case 2:
     case 3:
-        Log(LogLevel::Info, "KHMM: TXSendFrame case=%d len=%d chan=%d IsMP=%d\n",
-            num, len, CurChannel, IsMP);
-        Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
-        if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
+        {
+            u16 fc = *(u16*)&TXBuffer[12];
+            bool isDeauth = ((fc & 0x00FF) == 0x00C0);
+            // KHWaterMelonMix: suppress client deauth during relay
+            // transition so the host keeps the client in its session
+            // while both sides reset for the next game phase.
+            if (RelayModeActive && IsMPClient && isDeauth)
+            {
+                Log(LogLevel::Info, "KHMM: Suppressing client deauth during transition\n");
+                break;
+            }
+            Log(LogLevel::Info, "KHMM: TXSendFrame case=%d len=%d chan=%d IsMP=%d\n",
+                num, len, CurChannel, IsMP);
+            Platform::MP_SendPacket(TXBuffer, 12+len, USTimestamp, NDS.UserData);
+            if (!IsMP) WifiAP->SendPacket(TXBuffer, 12+len);
+        }
         break;
   case 4: // beacon
         Log(LogLevel::Info, "KHMM: TXSendFrame beacon len=%d chan=%d\n",
